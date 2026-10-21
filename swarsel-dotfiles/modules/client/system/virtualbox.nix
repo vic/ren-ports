@@ -1,0 +1,43 @@
+{ ren, inputs, ... }:
+let
+  sw = ren.helpers;
+in
+{
+  ren.aspects.virtualbox.nixos =
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
+    {
+      config = {
+        # specialisation = {
+        #   VBox.configuration = {
+        virtualisation.virtualbox = {
+          # leaving this here for future notice. setting guest.enable = true will make 'restarting sysinit-reactivation.target' take till timeout on nixos-rebuild switch
+          guest.enable = false;
+          host = {
+            enable = true;
+            package = pkgs.virtualbox;
+            addNetworkInterface = lib.mkIf config.virtualisation.virtualbox.host.enableKvm false;
+            enableExtensionPack = true;
+            enableKvm = true;
+          };
+        };
+        # run an older kernel to provide compatibility with windows vm
+        # boot = {
+        #   kernelPackages = lib.mkForce pkgs.stable24_05.linuxPackages;
+        #   # kernelParams = [
+        #   #   "amd_iommu=on"
+        #   # ];
+        # };
+
+        # fixes the issue of running together with QEMU
+        # NOTE: once you start a QEMU VM (use kvm) VirtualBox will fail to start VMs
+        # boot.kernelParams = [ "kvm.enable_virt_at_load=0" ];
+        #   };
+        # };
+      };
+    };
+}

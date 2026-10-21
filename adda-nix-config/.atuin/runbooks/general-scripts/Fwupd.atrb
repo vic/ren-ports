@@ -1,0 +1,60 @@
+id: 019fd8c8-afbc-7943-aa0d-2e7c3adcb351
+name: Fwupd
+version: 1
+forkedFrom: null
+content:
+- id: f6596d68-4414-48f3-b502-eb54c9a00b17
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: Fwupd
+    styles: {}
+  children: []
+- id: 951aecca-6f66-4e61-b58b-0984e91590ff
+  type: run
+  props:
+    type: bash
+    name: Terminal 1
+    code: |-
+      fwupdmgr refresh
+      fwupdmgr update
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: fc795008-b6c5-4477-9097-fba67b376feb
+  type: run
+  props:
+    type: bash
+    name: Terminal 2
+    code: sudo reboot
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: 3c6af78e-3c14-437d-9e33-f84c87eb60de
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: 30bd3f34-0288-43fe-9045-c58b71305e9d
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []

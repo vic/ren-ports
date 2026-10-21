@@ -1,0 +1,13 @@
+creation_rules:
+  - key_groups:
+      - age:
+          - age1yubikey1qwq4shht6jmgpdma3t0nkueqz2w2vfmtgq4jnj06rdtcjr2chlhexm4lpl0
+    path_regex: .*\.enc\.ya?ml$
+  - encrypted_regex: ^(data|stringData)$
+    key_groups:
+      - age:
+          - 'age1702hgudfz8y5ms3m4fukvvjhll7w9yeqk4tahewuv34t09rhd9sq756enl
+
+            '
+    mac-only-encrypted: true
+    path_regex: .*prod-axon.*/(SopsS|S)ecret-.*\.ya?ml$

@@ -1,0 +1,172 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: sonarr
+    app.kubernetes.io/name: sonarr
+  name: sonarr
+  namespace: media
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: sonarr
+      app.kubernetes.io/name: sonarr
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/configMaps: 6afd295ba69a82c4df80adaf6f00ce872e1396c3797c75b3f3c1807cf8d9dfab
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: sonarr
+        app.kubernetes.io/name: sonarr
+        den.observability/file-tailed: "true"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - args:
+            - sonarr
+            - --log-level
+            - warn
+          env:
+            - name: APIKEY
+              valueFrom:
+                secretKeyRef:
+                  key: sonarr
+                  name: media-arr-api-keys
+            - name: PORT
+              value: "9707"
+            - name: URL
+              value: http://localhost:8989
+          image: ghcr.io/onedr0p/exportarr@sha256:af535d94061cf97a52e1661945ffba78c03f9443eae7c0da1a80a5a4be56b520
+          name: exportarr
+          ports:
+            - containerPort: 9707
+              name: metrics
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /data
+              name: data
+            - mountPath: /config/MediaCover
+              name: metadata
+              subPath: media/metadata/sonarr/MediaCover
+            - mountPath: /scratch
+              name: scratch
+        - args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/config/.alloy
+            - --server.http.listen-addr=127.0.0.1:12345
+          image: docker.io/grafana/alloy@sha256:2aa2099af76c0098d4af7a4d6e48f86cb66dc1a000222ad927a1c67c6542d13f
+          name: logtail
+          securityContext:
+            runAsGroup: 65536
+            runAsUser: 1027
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /data
+              name: data
+            - mountPath: /etc/alloy/config.alloy
+              name: logtail
+              readOnly: true
+              subPath: config.alloy
+            - mountPath: /config/MediaCover
+              name: metadata
+              subPath: media/metadata/sonarr/MediaCover
+            - mountPath: /scratch
+              name: scratch
+        - env:
+            - name: PGID
+              value: "65536"
+            - name: PUID
+              value: "1027"
+            - name: SONARR__AUTH__APIKEY
+              valueFrom:
+                secretKeyRef:
+                  key: sonarr
+                  name: media-arr-api-keys
+            - name: SONARR__AUTH__METHOD
+              value: External
+            - name: SONARR__LOG__ROTATE
+              value: "2"
+            - name: SONARR__LOG__SIZELIMIT
+              value: "1"
+            - name: SONARR__POSTGRES__HOST
+              value: media-pg-rw
+            - name: SONARR__POSTGRES__LOGDB
+              value: sonarr-log
+            - name: SONARR__POSTGRES__MAINDB
+              value: sonarr-main
+            - name: SONARR__POSTGRES__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: media-pg-sonarr-password
+            - name: SONARR__POSTGRES__PORT
+              value: "5432"
+            - name: SONARR__POSTGRES__USER
+              valueFrom:
+                secretKeyRef:
+                  key: username
+                  name: media-pg-sonarr-password
+            - name: TZ
+              value: America/Los_Angeles
+          image: linuxserver/sonarr@sha256:44b06045a98bc1f237b9ffefc4b28dab64cb29305e4a2a94875ae93b5224e4cc
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /ping
+              port: 8989
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          name: main
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /ping
+              port: 8989
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /data
+              name: data
+            - mountPath: /config/MediaCover
+              name: metadata
+              subPath: media/metadata/sonarr/MediaCover
+            - mountPath: /scratch
+              name: scratch
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      serviceAccountName: sonarr
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: sonarr
+        - name: data
+          persistentVolumeClaim:
+            claimName: media-data-nfs
+        - configMap:
+            name: sonarr
+          name: logtail
+        - name: metadata
+          persistentVolumeClaim:
+            claimName: media-data-nfs
+        - name: scratch
+          persistentVolumeClaim:
+            claimName: media-scratch-nfs

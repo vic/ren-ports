@@ -1,0 +1,237 @@
+id: 019ade41-d997-7e83-8bcb-c8d5949956e4
+name: Nix
+version: 1
+forkedFrom: null
+content:
+- id: f6596d68-4414-48f3-b502-eb54c9a00b17
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: Nix
+    styles: {}
+  children: []
+- id: 71b9a26e-a27f-47e5-a6fb-3f45b9b42f33
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: Get URL hashes and automatic fetcher expression creation
+    styles: {}
+  children: []
+- id: c58816fe-2f02-4e1c-b003-129a1aafbed5
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: Sometimes, it can be confusing on how-to determine one. To simplify this, we can use the nix-prefetch-url command and generate its hash, which can then be converted to the appropriate Nix format. We can use both hashes in the package definition, but it’s recommended to convert it to the Nix format.
+    styles: {}
+  children: []
+- id: 0511e6d3-55e2-4547-b122-817770e91241
+  type: var
+  props:
+    name: url
+    value: https://github.com/trinhminhtriet/rmrfrs
+  children: []
+- id: 9c9ef141-d5e8-4fc6-bff7-d9b5c4c700d6
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: 5363d5a7-f996-48cc-b4b7-de60516b6799
+  type: script
+  props:
+    interpreter: sh
+    outputVariable: hashSha256Nix32
+    name: Fetch the source and get the hash
+    code: nix-prefetch-url --print-path --type sha256 {{var.url}}
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 12
+  children: []
+- id: 892bed54-99e2-45bb-a9ab-27232f045f7a
+  type: script
+  props:
+    interpreter: sh
+    outputVariable: ''
+    name: Convert the hash to SRI
+    code: nix hash convert --hash-algo sha256 $(echo "{{var.hashSha256Nix32}}" | head -n 1)
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 12
+  children: []
+- id: 02a202bd-3bf7-4f31-823b-428f8cac2675
+  type: script
+  props:
+    interpreter: sh
+    outputVariable: ''
+    name: 'Use `nurl` to directly get the fetcher expression '
+    code: nurl {{var.url}}
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 12
+  children: []
+- id: 5a714028-f117-43e2-9bc6-813e315fd436
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: Find which package provides a file (file path for library/executable/etc.)
+    styles: {}
+  children: []
+- id: cffbd484-6666-4e00-ad06-808d9bcd9e82
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: 'E.g., one can write '
+    styles: {}
+  - type: text
+    text: bin/my-executable
+    styles:
+      code: true
+  - type: text
+    text: ' '
+    styles: {}
+  - type: text
+    text: to search for a binary executable, or
+    styles:
+      code: true
+  children: []
+- id: 239d0100-55c1-4622-94c9-d5e3920b3570
+  type: local-directory
+  props: {}
+  children: []
+- id: 429c528b-6d15-4105-9984-f7a3dcb43cee
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: 133f7c1c-0ae3-4301-89bb-536cee001c2a
+  type: var
+  props:
+    name: file_path
+    value: libGL
+  children: []
+- id: 87c768ca-5d11-43bb-a1a6-b3521c73d28f
+  type: run
+  props:
+    type: bash
+    name: Run nix-locate
+    code: nix-locate {{var.file_path}}
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: f28d13ae-27a3-4440-9bb3-90610215aec5
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: Inspect flakes
+    styles: {}
+  children: []
+- id: e8649322-4ef5-4752-8fa0-ea3d14289e71
+  type: run
+  props:
+    type: bash
+    name: Show available templates for flakes
+    code: nix flake show templates
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: f2ccf524-d6ee-4ac8-9b89-3321aa503313
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 3
+    isToggleable: false
+  content:
+  - type: text
+    text: Inspect Flake inputs
+    styles: {}
+  children: []
+- id: b1773202-365d-44af-9c48-d37f40c722e6
+  type: run
+  props:
+    type: bash
+    name: Run nix-melt
+    code: nrn nix-melt
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: 57316a10-6cf0-43a0-a27c-70affc8db784
+  type: run
+  props:
+    type: bash
+    name: Inspect the flake metadata, can grep on desired inputs names
+    code: nix flake metadata
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: d79c4b5c-68f1-4d6b-8e18-847c18f0f24c
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: Others
+    styles: {}
+  children: []
+- id: 6d66024c-b8c5-4ba3-8b07-678f6db3ba3b
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []

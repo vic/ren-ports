@@ -1,0 +1,25 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-ingest-from-lan
+  namespace: monitoring
+spec:
+  description: Allow the cluster nodes and LAN hosts to push to the monitoring ingest proxy.
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: monitoring-ingest
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+    - fromCIDR:
+        - 10.0.0.0/8
+        - 100.64.0.0/10
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP

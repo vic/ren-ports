@@ -1,0 +1,291 @@
+{ ren, inputs, ... }:
+let
+  # Shared with cortex.nix, which decrypts the guest's key into hostKeyShare.
+  inherit (ren.helpers.hostKey) hostKeyShare hostKeyDir;
+in
+{
+  ren.guest.cortex-cuda = {
+    system = ren.system.x86_64-linux;
+    channel = ren.channel.nixos-unstable;
+    environment = ren.environment.dev;
+    # No standalone nixosConfiguration output: ren guest kind has none (den intoAttr = [ ]).
+
+
+    # Delivered as a microvm guest of cortex (see cortex.nix `guests`).
+    # The guests policy resolves this as a raw entity bypassing the host
+    # submodule (gap G6), so the secretPath/public_key submodule defaults never
+    # compute.
+    # The guest's own host key (generate-host-keys), so its agenix rekeys
+    # against it rather than cortex's. cortex decrypts the private key and
+    # hands it in read-only (hostKeyShare below): the guest has no persistent
+    # disk, and must not hold cortex's identity.
+    secretPath = ../../../.secrets/hosts/cortex-cuda;
+    public_key = ../../../.secrets/hosts/cortex-cuda/ssh_host_ed25519_key.pub;
+
+    # The guest is a raw entity (no host-submodule `facts` default), but
+    # roles.default's core.system.facter reads host.facts. Point it at the
+    # PARENT's facter report — the guest runs on cortex's hardware (GPU
+    # passthrough device IDs derive from it).
+    facts = ../../../hosts/cortex/facter.json;
+
+    networking.interfaces.vm-cuda.ipv4 = [ "10.9.2.2/16" ];
+
+    # B2: passthrough intent on the ENTITY (the host-side GPU overlay reads
+    # vm.microvm.passthrough).
+    microvm.passthrough = [ "nvidia" ];
+    # CUDA-enabled package set for microvm.vms.<n>.pkgs (sini den/hosts/cortex-cuda.nix microvm.pkgs).
+    microvm.guestPkgs = import inputs.nixpkgs-unstable {
+      system = "x86_64-linux";
+      config = {
+        allowUnfree = true;
+        nvidia.acceptLicense = true;
+        cudaSupport = true;
+        cudnnSupport = true;
+      };
+    };
+
+    # The guest pins its own machine-id (environment.etc below) and takes its SSH host key from
+    # the host-key share, so persisting either would bind over them. The persist channel `into`
+    # reads this field off the receiving guest binding and drops the matching files.
+    unpersist = {
+      files = [ "/etc/machine-id" ];
+      filePrefixes = [ "/etc/ssh/ssh_host_" ];
+    };
+
+    # Settings fields on the entity to ollama-cuda.
+    svc-ai-ollama.acceleration = "cuda";
+
+    # HyperQwen (patched vLLM) is the resident engine, by owner decision 2026-10-10:
+    # 150,000 context (CTX=long, MTP), 96 tok/s single-stream and 320 aggregate at four
+    # streams against ninfer's 72 and 82, measured in ~/Documents/models-todo.md. It answers
+    # to ninfer's model id on :18020 and is admitted to ninfer's sources (alsoAdmitPorts
+    # below). Reverting is a flip: hyperqwen.autoStart = false, ninfer.autoStart = true.
+    #
+    # Serving the Swift uncensored build (owner, 2026-10-10): 101 tok/s and 346 aggregate,
+    # about 60% fewer reasoning tokens, guard 0/51 FN and 0/33 FP, but 1 of 84 guard cases loops
+    # in reasoning under concurrency (fail-closed). model = "qwen3.8-27b" restores the official.
+    svc-ai-hyperqwen = {
+      model = "swift-qwen3.8-27b";
+      autoStart = true;
+      env = {
+        SPEC = "mtp";
+        CTX = "long";
+        # Turn 2+ of a long agent session reuses the history's KV instead of re-prefilling
+        # it (upstream: ~23 s to ~1 s at 24K); opt-in upstream for hybrid models.
+        PREFIX_CACHE = "1";
+      };
+    };
+
+    # ninfer is the standby engine (hyperqwen is resident, above). NInfer measured
+    # 96.2 tok/s decode at the default int8 KV against llama-cpp's 45.5 on
+    # identical prompts (2.1x), for a 1.26x prefill cost, and it keeps the shared
+    # 145,408-token pool described below.
+    #
+    # llama-cpp (gpt-oss-20b under the cluster's model alias) stays installed as
+    # the standby for when cluster retain needs this GPU: `systemctl start
+    # llama-cpp` on the guest — the Conflicts= evicts the resident engine — made
+    # permanent by flipping autoStart here and the llama-cpp wantedBy below.
+    svc-ai-ninfer = {
+      # Standby while hyperqwen is resident (see above); its configuration is kept intact.
+      autoStart = false;
+      alsoAdmitPorts = [ 18020 ];
+      # Subagent fan-out: the KV pool is SHARED, not divided, so four admitted
+      # requests draw from the same 145,408 tokens elastically. What N
+      # multiplies is the per-sequence LinearAttentionStatePool slot (recurrent
+      # state for the 48 linear-attention layers) plus draft/graph buffers —
+      # paid out of the ~1 GiB the int8 profile freed.
+      #
+      # What 4 actually buys, measured here: DECODE batches (four 200-token
+      # replies finish together in 9.7s against 2.9s for one, so ~83 tok/s
+      # aggregate against ~68 single-stream, at ~21 tok/s per agent), while
+      # PREFILL stays serialized — four 30K-token prompts finished 72s apart
+      # even at 83% pool occupancy. So N agents with large prompts pay N x
+      # prefill (~1050 tok/s) before the last one decodes. The engine never
+      # over-admits and never truncates: prompt_tokens came back exact at 40K,
+      # 100K and 137K, including a pair summing to 135% of the pool.
+      maxConcurrency = 4;
+
+      # Measured on this guest, not inherited: each admitted slot costs 390 MiB
+      # of Engine runtime reservation, and the pool costs 35,904 bytes/token. At
+      # the aspect default of 150912 a fourth slot is REJECTED by 142 MiB
+      # (needs 7246216448, has 7096712192). 145408 is the largest 64-token page
+      # boundary that fits all four: it starts and serves with 356 MiB free
+      # after startup — better tolerance than the single-agent profile this
+      # replaced — for 3.6% less context.
+      maxContext = 145408; # 2272 pages x 64 tokens
+      kvCapacity = "145408";
+
+      # Restricted to the hosts that consume it and the axon cluster's
+      # workloads (genie-agent).
+      clients.clusters = [ "axon" ];
+    };
+  };
+
+  ren.aspects.cortex-cuda = {
+    at = ren.guest.cortex-cuda;
+    includes = with ren.aspects; [
+      # The host baseline at the guest's own scope.
+      default
+      inference
+      svc-ai-hyperqwen
+      hardware-gpu-nvidia
+      # Opaque to cortex (it sees only the memory reservation), so it reports
+      # for itself.
+      svc-monitoring-prometheus-exporter
+      svc-alloy
+    ];
+
+    nixos =
+      {
+        config,
+        lib,
+        ...
+      }:
+      {
+        networking.hostName = "cortex-cuda";
+        # The participating fleet baseline (core.nix.stateVersion) sets the
+        # fleet default; this guest pins its own. mkForce to win the merge.
+        system.stateVersion = lib.mkForce "25.05";
+
+        # The guest uses our externally-created CUDA pkgs (microvm.guestPkgs), so its own nixpkgs.config
+        # must be empty (allowUnfree/acceptLicense are baked into that external instance).
+        # hardware.gpu.nvidia otherwise sets nixpkgs.config.nvidia.acceptLicense, tripping the
+        # external-instance assertion.
+        nixpkgs.config = lib.mkForce { };
+
+        microvm = {
+          guest.enable = true;
+          optimize.enable = true;
+          vcpu = 32;
+          # 64 GB: headroom for llama-cpp's host PROMPT cache (--cache-ram 49152,
+          # saved slot state for prompt reuse). Not KV spillover — stock
+          # llama.cpp keeps active KV on the card.
+          # mem = 65536;
+          mem = 32768;
+
+          interfaces = [
+            {
+              id = "vm-cuda";
+              type = "tap";
+              mac = "02:00:00:01:01:01";
+            }
+          ];
+
+          shares = [
+            {
+              source = hostKeyShare;
+              mountPoint = hostKeyDir;
+              tag = "host-key";
+              proto = "virtiofs";
+            }
+            {
+              source = "/cache/var/lib/private/llama-cpp";
+              mountPoint = "/cache/var/lib/private/llama-cpp";
+              tag = "llama-cpp";
+              proto = "virtiofs";
+            }
+            {
+              source = "/cache/var/lib/private/ninfer";
+              mountPoint = "/cache/var/lib/private/ninfer";
+              tag = "ninfer";
+              proto = "virtiofs";
+            }
+            {
+              source = "/cache/var/lib/private/hyperqwen";
+              mountPoint = "/cache/var/lib/private/hyperqwen";
+              tag = "hyperqwen";
+              proto = "virtiofs";
+            }
+          ];
+        };
+
+        # No virtual console in the VM: vconsole setup can only fail.
+        console.enable = false;
+
+        environment.etc."machine-id" = {
+          mode = "0644";
+          text = (builtins.hashString "md5" "cortex-cuda") + "\n";
+        };
+
+        systemd.services.nvidia-gpu-config = {
+          description = "Configure NVIDIA GPU";
+          wantedBy = [ "multi-user.target" ];
+          path = [ config.hardware.nvidia.package.bin ];
+          script = ''
+            nvidia-smi -pl 450
+            nvidia-smi -rmc
+          '';
+          serviceConfig.Type = "oneshot";
+        };
+        systemd.services.llama-cpp = {
+          after = [ "nvidia-gpu-config.service" ];
+          wantedBy = lib.mkForce [ ];
+        };
+        systemd.services.ninfer.after = [ "nvidia-gpu-config.service" ];
+
+        # One 24 GB card holds one engine, and ninfer.service already declares
+        # Conflicts= against llama-cpp. Both being wantedBy multi-user.target
+        # would race at boot and let systemd pick the winner, so exactly one may
+        # autostart: ninfer via autoStart = true above, llama-cpp held back by
+        # the wantedBy override. The llama-cpp ASPECT stays untouched — which
+        # engine is resident is a property of this host, not of llama-cpp.
+
+        networking.firewall.allowedTCPPorts = [ 22 ];
+
+        systemd.network = {
+          enable = true;
+          networks."20-lan" = {
+            matchConfig.MACAddress = "02:00:00:01:01:01";
+            networkConfig = {
+              Address = [
+                "10.9.2.2/16"
+                "fe80::ff:fe01:101/64"
+              ];
+              Gateway = "10.9.0.1";
+              DNS = [
+                "1.1.1.1"
+                "8.8.8.8"
+              ];
+              IPv6AcceptRA = true;
+              DHCP = "no";
+            };
+          };
+        };
+
+        boot.kernel.sysctl = {
+          "net.core.default_qdisc" = "fq";
+          "net.ipv4.tcp_congestion_control" = "bbr";
+          "net.core.rmem_max" = 16777216;
+          "net.core.wmem_max" = 16777216;
+          "net.ipv4.tcp_rmem" = "4096 87380 16777216";
+          "net.ipv4.tcp_wmem" = "4096 65536 16777216";
+          "net.ipv4.tcp_fastopen" = 3;
+        };
+
+        # core.users.shell enables zsh in the `os` class, but the guest delivery
+        # route collects only `nixos`, so the users' zsh login shell needs it here.
+        programs.zsh.enable = true;
+
+        # The key share must be mounted before agenix runs in activation.
+        fileSystems.${hostKeyDir}.neededForBoot = true;
+        age.identityPaths = lib.mkForce [ "${hostKeyDir}/ssh_host_ed25519_key" ];
+
+        services.openssh.hostKeys = lib.mkForce [
+          {
+            path = "${hostKeyDir}/ssh_host_ed25519_key";
+            type = "ed25519";
+          }
+        ];
+
+        services.openssh = {
+          enable = true;
+          settings = {
+            PasswordAuthentication = false;
+            # Guest uses root key login (root authorizedKeys injected host-side);
+            # override the fleet baseline's "prohibit-password".
+            PermitRootLogin = lib.mkForce "yes";
+          };
+        };
+      };
+  };
+}

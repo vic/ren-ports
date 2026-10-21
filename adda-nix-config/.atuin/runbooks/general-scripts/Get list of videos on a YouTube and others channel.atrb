@@ -1,0 +1,41 @@
+id: 01999c23-55c1-78f3-9c3c-d3843f5ea97b
+name: Get list of videos on a YouTube (and others) channel
+version: 1
+content:
+- id: f6596d68-4414-48f3-b502-eb54c9a00b17
+  type: heading
+  props:
+    textColor: default
+    backgroundColor: default
+    textAlignment: left
+    level: 1
+  content:
+  - type: text
+    text: Get list of videos on a YouTube (and others) channel
+    styles: {}
+  children: []
+- id: b3ef179c-c938-48f6-8e54-fb01a79d5c05
+  type: var
+  props:
+    name: channel_url
+    value: https://www.youtube.com/@LearnLinuxTV
+  children: []
+- id: 010e5363-aafc-43b7-8869-e53a287283b4
+  type: run
+  props:
+    type: bash
+    name: Terminal 1
+    code: yt-dlp --skip-download --flat-playlist --print "%(title)s %(webpage_url)s" "{{ var.channel_url }}"
+    pty: b7bb20d1-6d4d-44f0-ad4a-9e989dae17d7
+    global: false
+    outputVisible: true
+    dependency: '{}'
+  children: []
+- id: 2a78e1a0-8180-4432-bbe4-5f49f90f8ce5
+  type: paragraph
+  props:
+    textColor: default
+    backgroundColor: default
+    textAlignment: left
+  content: []
+  children: []

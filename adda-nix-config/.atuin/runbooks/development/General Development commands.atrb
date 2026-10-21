@@ -1,0 +1,49 @@
+id: 019c659e-39e6-7b71-828b-ed7656566e9b
+name: General Development commands
+version: 1
+forkedFrom: null
+content:
+- id: f6596d68-4414-48f3-b502-eb54c9a00b17
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: General Development commands
+    styles: {}
+  children: []
+- id: 7e02cf25-fcbb-4fd7-b800-aa5f3b98cbe9
+  type: bulletListItem
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: 'Own everything in the folder recursively by the $USER from the users group: '
+    styles: {}
+  - type: text
+    text: sudo chown -R $USER:users
+    styles:
+      code: true
+  children: []
+- id: 53e298c2-5e54-4d3f-ad28-8357f91b3561
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: 30bd3f34-0288-43fe-9045-c58b71305e9d
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []

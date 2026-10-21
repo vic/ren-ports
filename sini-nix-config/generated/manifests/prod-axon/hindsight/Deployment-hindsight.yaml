@@ -1,0 +1,165 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: hindsight
+    app.kubernetes.io/name: hindsight
+  name: hindsight
+  namespace: ai
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: hindsight
+      app.kubernetes.io/name: hindsight
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/configMaps: 04d0961bd8f7419e710646cf418c2c3dec1cf65905160901bf281d90f1f61def
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: hindsight
+        app.kubernetes.io/name: hindsight
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - env:
+            - name: HINDSIGHT_API_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: url
+                  name: hindsight-pg-dsn
+            - name: HINDSIGHT_API_ENABLE_DOCUMENT_IMPORT_API
+              value: "true"
+            - name: HINDSIGHT_API_FAIL_ON_EXTRACTION_ERRORS
+              value: "true"
+            - name: HINDSIGHT_API_HOST
+              value: 0.0.0.0
+            - name: HINDSIGHT_API_LLM_API_KEY
+              value: not-needed
+            - name: HINDSIGHT_API_LLM_BASE_URL
+              value: http://llama-cpp-gpt-oss.ai.svc.cluster.local:8080/v1
+            - name: HINDSIGHT_API_LLM_MAX_CONCURRENT
+              value: "6"
+            - name: HINDSIGHT_API_LLM_MODEL
+              value: gpt-oss-20b
+            - name: HINDSIGHT_API_LLM_PROVIDER
+              value: openai
+            - name: HINDSIGHT_API_LLM_REASONING_EFFORT
+              value: low
+            - name: HINDSIGHT_API_LLM_TIMEOUT
+              value: "900"
+            - name: HINDSIGHT_API_LOG_LEVEL
+              value: info
+            - name: HINDSIGHT_API_OPERATION_VALIDATOR_ADMIN_SHA256_FILE
+              value: /etc/hindsight-write-gate/admin/sha256
+            - name: HINDSIGHT_API_OPERATION_VALIDATOR_BANKS
+              value: '{"den-law":{"gate_reads":true,"readers":["vic"]},"genie":{"gate_reads":false,"readers":[]},"genie-memory":{"gate_reads":false,"readers":[]}}'
+            - name: HINDSIGHT_API_OPERATION_VALIDATOR_EXTENSION
+              value: hindsight_write_gate:WriteGate
+            - name: HINDSIGHT_API_OPERATION_VALIDATOR_TOKENS_DIR
+              value: /etc/hindsight-write-gate/tokens
+            - name: HINDSIGHT_API_PORT
+              value: "8888"
+            - name: HINDSIGHT_API_VECTOR_EXTENSION
+              value: pgvector
+            - name: HINDSIGHT_API_WORKER_ID
+              value: hindsight
+            - name: HINDSIGHT_API_WORKER_MAX_SLOTS
+              value: "6"
+            - name: PYTHONPATH
+              value: /opt/hindsight-write-gate
+          image: ghcr.io/vectorize-io/hindsight-api@sha256:7b14a1f4062252992d0176758753615e0a2071d9a269995be007be223ab01812
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /health/live
+              port: 8888
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          name: main
+          ports:
+            - containerPort: 8888
+              name: http
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /health
+              port: 8888
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          resources:
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+            requests:
+              cpu: 200m
+              memory: 1Gi
+          startupProbe:
+            failureThreshold: 60
+            httpGet:
+              path: /health
+              port: 8888
+            periodSeconds: 10
+          volumeMounts:
+            - mountPath: /etc/hindsight-write-gate/admin
+              name: admin-digest
+              readOnly: true
+            - mountPath: /home/hindsight/.cache
+              name: model-cache
+            - mountPath: /opt/hindsight-write-gate/hindsight_write_gate.py
+              name: write-gate
+              readOnly: true
+              subPath: hindsight_write_gate.py
+            - mountPath: /etc/hindsight-write-gate/tokens
+              name: write-tokens
+              readOnly: true
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      initContainers:
+        - command:
+            - sh
+            - -c
+            - 'hindsight-admin decommission-worker hindsight --yes || echo ''release-stale-tasks: skipped (see error above)'''
+          env:
+            - name: HINDSIGHT_API_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: url
+                  name: hindsight-pg-dsn
+          image: ghcr.io/vectorize-io/hindsight-api@sha256:7b14a1f4062252992d0176758753615e0a2071d9a269995be007be223ab01812
+          name: release-stale-tasks
+          volumeMounts:
+            - mountPath: /home/hindsight/.cache
+              name: model-cache
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      serviceAccountName: hindsight
+      volumes:
+        - name: admin-digest
+          secret:
+            defaultMode: 288
+            secretName: hindsight-cp-admin-token-sha256
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: hindsight
+        - configMap:
+            name: hindsight
+          name: write-gate
+        - name: write-tokens
+          secret:
+            defaultMode: 288
+            secretName: hindsight-write-tokens

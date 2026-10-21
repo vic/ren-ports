@@ -1,0 +1,17 @@
+argocd-oidc-client-secret: ENC[AES256_GCM,data:5HoP7Wp3fCEQrGJuavYLAI4OxwmnZnXFGxh0TLlTJoEnRIhrmDqQRtJyaAs97tvFBzsYbxDwCgyCffG+jy5UGDFNs27rkXit,iv:ILiwePlj+LrqbTXa/o0H2xANZs5hKjDk8WVGRpaz9Io=,tag:DEtlAIg/awk5f2uMCmWoFg==,type:str]
+sops:
+    age:
+        - recipient: age1yubikey1qwq4shht6jmgpdma3t0nkueqz2w2vfmtgq4jnj06rdtcjr2chlhexm4lpl0
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHBpdi1wMjU2IElYZUZuUSBBdyt5QWs2
+            SDJoL05LNTV0SDNWa1VrQ0lodnBINFJkTHZpV2tvU2VJMnNmcwpUdmlCVWM3ZDd2
+            YWtLZkYzM1RZT2M2UGxYWThiZWN4aTh4YVVNMjgwbXVRCi0tLSBWaHNrQU00cTZi
+            ZC9LWjdTVnhhT3l4Z0YxRmllRHR4SHRXNUFaa0ZwTUpZChc1T1S0Y5Yf/D15cs16
+            0yGvjJf2uT1aP2DP9/3hJypCB+U60LCyW3F0P4Kh6+hRStSzX+z8SDN16Ii0gWFq
+            uKM=
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2026-03-18T03:25:57Z"
+    mac: ENC[AES256_GCM,data:mBJVt6VbqRhButq0FJl8paeVAm8Z+PO1oUtaNqG3zzScV1RXoqgZmxaY1aFVqns4kEyVo1TtT2mCEcTIsHrIZVaGIs/lJMjGMAvk2jpZpWldHVSBwdtlTccqTiFQ797zhODK5Z9XgYkFDCfEgyiuD4mhuuaj3cYQO4FSHkRP3KU=,iv:6G3bneN+5hL+dHZFKIxXRGDhZdViae/CK+FIABbqDuM=,tag:VXK/Blur7bn7W5tr6jnzHg==,type:str]
+    unencrypted_suffix: _unencrypted
+    version: 3.12.1

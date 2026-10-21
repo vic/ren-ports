@@ -1,0 +1,25 @@
+From 015a22962bf3a3a85573a051f28d02142c1bd598 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?David=20Chocholat=C3=BD?= <chocholaty.david@protonmail.com>
+Date: Sun, 28 Sep 2025 12:39:00 +0200
+Subject: [PATCH] Increse maximal line length
+
+---
+ meld/filediff.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/meld/filediff.py b/meld/filediff.py
+index f8bafbc..5789da8 100644
+--- a/meld/filediff.py
++++ b/meld/filediff.py
+@@ -100,7 +100,7 @@ PANE_LEFT, PANE_RIGHT = -1, +1
+ 
+ LOAD_PROGRESS_MARK = "meld-load-progress"
+ #: Line length at which we'll cancel loads because of potential hangs
+-LINE_LENGTH_LIMIT = 16 * 1024
++LINE_LENGTH_LIMIT = 1024 * 1024
+ 
+ class CursorDetails:
+     __slots__ = (
+-- 
+2.51.0
+

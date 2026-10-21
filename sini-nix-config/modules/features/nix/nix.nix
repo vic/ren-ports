@@ -1,0 +1,73 @@
+{ ... }:
+{
+  ren.aspects.nix = {
+    os = {
+      nix = {
+        nixPath = [ "nixpkgs=flake:nixpkgs" ];
+        settings = {
+          experimental-features = [
+            "auto-allocate-uids"
+            "cgroups"
+            "flakes"
+            "nix-command"
+            "pipe-operators"
+          ];
+
+          allow-import-from-derivation = true;
+          max-jobs = "auto";
+          use-xdg-base-directories = true;
+          http-connections = 128;
+          max-substitution-jobs = 128;
+          log-lines = 25;
+          min-free = 128000000;
+          max-free = 1000000000;
+          auto-optimise-store = true;
+          warn-dirty = false;
+          keep-outputs = true;
+          keep-derivations = true;
+
+          substituters = [
+            "https://cache.nixos.org/"
+            "https://nix-community.cachix.org"
+            "https://numtide.cachix.org"
+            # What our CI builds (services/nix/attic.nix): public-read.
+            "https://attic.json64.dev/ci"
+          ];
+
+          trusted-public-keys = [
+            "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+            "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+            "numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE="
+            "ci:1i+3fr0BNdABCWGG0CGUpcvzWCLpnx7/EuEQujmowmg="
+          ];
+
+          connect-timeout = 5;
+          builders-use-substitutes = true;
+          sandbox = "relaxed";
+          fallback = true;
+        };
+
+        gc = {
+          automatic = true;
+          options = "--delete-older-than 8d";
+        };
+      };
+    };
+
+    darwin = {
+      nix.settings = {
+        # trusted-users (root-equivalent nix power) stays admin-only; allowed-users
+        # (mere daemon access) covers every local login user. See the nixos arm.
+        trusted-users = [
+          "root"
+          "@admin"
+        ];
+        allowed-users = [ "*" ];
+      };
+      nix.gc.interval = {
+        Hour = 5;
+        Minute = 0;
+      };
+    };
+  };
+}

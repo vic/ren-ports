@@ -1,0 +1,244 @@
+# media-music: beets library manager
+{ ren, ... }:
+{
+  ren.aspects.media-music = {
+    homeManager =
+      {
+        config,
+        # inputs',
+        # pkgs,
+        ...
+      }:
+      {
+        programs.beets = {
+          enable = true;
+          # package =
+          # (
+          # inputs'.nixpkgs-stable.legacyPackages.beets
+          # pkgs.stable.beets
+          # pkgs.beets
+          # .override {
+          #   pluginOverrides = {
+          #     beatport.enable = false;
+          #   };
+          # }
+          # )
+          # ;
+          settings = {
+            # --------------- Main ---------------
+
+            library = "${config.xdg.dataHome}/beets/music-library.db";
+            directory = "${config.xdg.userDirs.music}/beets/";
+            # statefile: state.pickle
+
+            # --------------- Plugins ---------------
+
+            plugins = [
+              "musicbrainz"
+            ];
+
+            # pluginpath: []
+
+            # --------------- Import ---------------
+
+            # clutter: [Thumbs.DB, .DS_Store]
+            # ignore:
+            # - .*
+            # - '*~'
+            # - System Volume Information
+            # - lost+found
+            # ignore_hidden: yes
+
+            # import:
+            #     write: yes
+            #     copy: yes
+            #     move: no
+            #     timid: no
+            #     quiet: no
+            #     log:
+            #     default_action: apply
+            #     languages: []
+            #     quiet_fallback: skip
+            #     none_rec_action: ask
+            #     link: no
+            #     hardlink: no
+            #     reflink: no
+            #     delete: no
+            #     resume: ask
+            #     incremental: no
+            #     incremental_skip_later: no
+            #     from_scratch: no
+            #     autotag: yes
+            #     singletons: no
+            #     detail: no
+            #     flat: no
+            #     group_albums: no
+            #     pretend: no
+            #     search_ids: []
+            #     duplicate_keys:
+            #         album: albumartist album
+            #         item: artist title
+            #     duplicate_action: ask
+            #     duplicate_verbose_prompt: no
+            #     bell: no
+            #     set_fields: {}
+            #     ignored_alias_types: []
+            #     singleton_album_disambig: yes
+
+            # # --------------- Paths ---------------
+
+            # path_sep_replace: _
+            # drive_sep_replace: _
+            # asciify_paths: no
+            # art_filename: cover
+            # max_filename_length: 0
+            # replace:
+            #     '[<>:\?\*\|]': _
+            #     \": _
+            #     '[\\/]': _
+            #     ^\.: _
+            #     \.$: _
+            #     '[\x00-\x1f]': _
+            #     ^-: _
+            #     \s+$: ''
+            #     ^\s+: ''
+
+            # aunique:
+            #     keys: albumartist album
+            #     disambiguators: albumtype year label catalognum albumdisambig releasegroupdisambig
+            #     bracket: '[]'
+
+            # sunique:
+            #     keys: artist title
+            #     disambiguators: year trackdisambig
+            #     bracket: '[]'
+
+            # # --------------- Tagging ---------------
+
+            # per_disc_numbering: no
+            # original_date: no
+            # artist_credit: no
+            # id3v23: no
+            # va_name: Various Artists
+            # paths:
+            #     default: $albumartist/$album%aunique{}/$track $title
+            #     singleton: Non-Album/$artist/$title
+            #     comp: Compilations/$album%aunique{}/$track $title
+
+            # # --------------- Performance ---------------
+
+            # threaded: yes
+            # timeout: 5.0
+
+            # # --------------- UI ---------------
+
+            # verbose: 0
+            # terminal_encoding:
+
+            # ui:
+            #     terminal_width: 80
+            #     length_diff_thresh: 10.0
+            #     color: yes
+            #     colors:
+            #         text_success: [bold, green]
+            #         text_warning: [bold, yellow]
+            #         text_error: [bold, red]
+            #         text_highlight: [bold, red]
+            #         text_highlight_minor: [white]
+            #         action_default: [bold, cyan]
+            #         action: [bold, cyan]
+            #         text_faint: [faint]
+            #         import_path: [bold, blue]
+            #         import_path_items: [bold, blue]
+            #         changed: [yellow]
+            #         text_diff_added: [bold, green]
+            #         text_diff_removed: [bold, red]
+            #         action_description: [white]
+
+            #     import:
+            #         indentation:
+            #             match_header: 2
+            #             match_details: 2
+            #             match_tracklist: 5
+            #         layout: column
+
+            # # --------------- Search ---------------
+
+            # format_item: $artist - $album - $title
+            # format_album: $albumartist - $album
+            # time_format: '%Y-%m-%d %H:%M:%S'
+            # format_raw_length: no
+
+            # sort_album: albumartist+ album+
+            # sort_item: artist+ album+ disc+ track+
+            # sort_case_insensitive: yes
+
+            # # --------------- Autotagger ---------------
+
+            # overwrite_null:
+            #     album: []
+            #     track: []
+
+            # match:
+            #     strong_rec_thresh: 0.04
+            #     medium_rec_thresh: 0.25
+            #     rec_gap_thresh: 0.25
+            #     max_rec:
+            #         missing_tracks: medium
+            #         unmatched_tracks: medium
+            #     distance_weights:
+            #         data_source: 2.0
+            #         artist: 3.0
+            #         album: 3.0
+            #         media: 1.0
+            #         mediums: 1.0
+            #         year: 1.0
+            #         country: 0.5
+            #         label: 0.5
+            #         catalognum: 0.5
+            #         albumdisambig: 0.5
+            #         album_id: 5.0
+            #         tracks: 2.0
+            #         missing_tracks: 0.9
+            #         unmatched_tracks: 0.6
+            #         track_title: 3.0
+            #         track_artist: 2.0
+            #         track_index: 1.0
+            #         track_length: 2.0
+            #         track_id: 5.0
+            #         medium: 1.0
+            #     preferred:
+            #         countries: []
+            #         media: []
+            #         original_year: no
+            #     ignored: []
+            #     required: []
+            #     ignored_media: []
+            #     ignore_data_tracks: yes
+            #     ignore_video_tracks: yes
+            #     track_length_grace: 10
+            #     track_length_max: 30
+            #     album_disambig_fields: data_source media year country label catalognum albumdisambig
+            #     singleton_disambig_fields: data_source index track_alt album
+            # disabled_plugins: []
+            # musicbrainz:
+            #     search_limit: 5
+            #     data_source_mismatch_penalty: 0.5
+            #     host: musicbrainz.org
+            #     https: no
+            #     ratelimit: 1
+            #     ratelimit_interval: 1
+            #     genres: no
+            #     external_ids:
+            #         discogs: no
+            #         bandcamp: no
+            #         spotify: no
+            #         deezer: no
+            #         tidal: no
+            #     extra_tags: []
+
+          };
+        };
+      };
+  };
+}

@@ -1,0 +1,52 @@
+id: 01999c23-55c7-70c2-bd64-ac18d11caa9e
+name: Xremap
+version: 1
+forkedFrom: null
+content:
+- id: 019f3b62-e21b-71c6-9e0b-094c50941ad9
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: Xremap
+    styles: {}
+  children: []
+- id: 3ffbbd9b-a6bf-466a-99ff-4f0d9192b3b4
+  type: local-directory
+  props: {}
+  children: []
+- id: 0199b524-0615-7639-ab34-15d568d8deb0
+  type: script
+  props:
+    interpreter: /run/current-system/sw/bin/fish
+    outputVariable: ''
+    name: Stop key remapping
+    code: systemctl --user stop xremap
+    outputVisible: false
+    dependency: '{}'
+    terminalRows: 34
+  children: []
+- id: ce43a1fb-f442-4a3c-9d01-17b1edade759
+  type: script
+  props:
+    interpreter: /run/current-system/sw/bin/fish
+    outputVariable: ''
+    name: Start key remapping
+    code: systemctl --user restart xremap
+    outputVisible: false
+    dependency: '{}'
+    terminalRows: 12
+  children: []
+- id: 9e462e81-b440-4b00-88ab-a457c1f72457
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []

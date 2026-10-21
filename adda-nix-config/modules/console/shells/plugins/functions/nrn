@@ -1,0 +1,3 @@
+function nrn() {
+    nix run --impure nixpkgs\#"${1}"
+}

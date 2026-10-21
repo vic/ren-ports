@@ -1,0 +1,425 @@
+# Envoy Gateway — Gateway API controller via envoyproxy/gateway-helm,
+# experimental channel CRDs, EnvoyProxy config, default-gateway with
+# per-domain HTTP/HTTPS listeners, CiliumNetworkPolicies.
+{ ren, ... }:
+{
+  ren.aspects.k8s-network-gateway-envoy-gateway = {
+    # Public 443, TCP and UDP, enters at default-gateway as custom NAT, which
+    # masquerades hairpin clients only, so the gateway sees internet clients'
+    # own addresses.
+    port-forwards =
+      { cluster, ... }:
+      {
+        inherit (cluster) environment;
+        name = "${cluster.name}-https-ingress";
+        mode = "nat";
+        protocol = "tcp_udp";
+        wanPort = "443";
+        forward = {
+          ip = ren.helpers.getAssignment cluster "default-gateway";
+          port = "443";
+        };
+      };
+
+    crds =
+      { inputs, system, ... }:
+      {
+        name = "envoy-gateway";
+        chart = inputs.nixhelm.chartsDerivations.${system}.envoyproxy.gateway-crds-helm;
+        extraOpts = [
+          "--set crds.gatewayAPI.enabled=true"
+          "--set crds.gatewayAPI.channel=experimental"
+          "--set crds.envoyGateway.enabled=true"
+        ];
+        # Sole owner of the Gateway API CRDs (experimental channel — a strict
+        # superset of standard, and what the live cluster runs) plus the
+        # Envoy-specific kinds; this module also generates the Gateway/HTTPRoute/
+        # GatewayClass nixidy types. No kindFilter: the full set materializes in
+        # bootstrap ahead of every consumer. The gateway-api aspect is NOT
+        # included on the cluster — a second (standard-channel) copy duplicated
+        # every shared kind and blocked the bootstrap sync
+        # (RepeatedResourceWarning).
+      };
+
+    k8s-manifests =
+      {
+        cluster,
+        charts,
+        lib,
+        certificate-domains,
+        apex-domains,
+        ...
+      }:
+      let
+        inherit (lib)
+          flatten
+          mapAttrsToList
+          optional
+          optionalAttrs
+          ;
+
+        numReplicas = if cluster.hosts != null then builtins.length cluster.hosts else 3;
+        # The tls.dns01 domains, each with `apex` when web.apex serves its bare name.
+        apexes = map (a: a.domain) apex-domains;
+        domains = lib.listToAttrs (
+          map (
+            d: lib.nameValuePair d.domain (d // { apex = builtins.elem d.domain apexes; })
+          ) certificate-domains
+        );
+
+        # Resolve a domain's k8s resource-name stem: an explicit per-domain
+        # resourceName (for nested wildcards that would otherwise collide on
+        # their last-two-labels) takes precedence over the default derivation.
+        # Note the explicit `if … != null`: resourceName is always present (null
+        # when unset), so `or` would never fall back.
+        resourceNameFor =
+          domain: args:
+          if args.resourceName != null then args.resourceName else ren.helpers.resourceForDomain domain;
+        default-gateway-address = ren.helpers.getAssignment cluster "default-gateway";
+      in
+      {
+        # Envoy Gateway system controller
+        applications.envoy-gateway-system = {
+          namespace = "envoy-gateway-system";
+
+          syncPolicy = {
+            syncOptions = {
+              clientSideApplyMigration = false;
+              serverSideApply = true;
+            };
+          };
+
+          helm.releases.envoy = {
+            chart = charts.envoyproxy.gateway-helm;
+
+            values = {
+              deployment.replicas = 1;
+              config = {
+                envoyGateway = {
+                  gateway.controllerName = "gateway.envoyproxy.io/gatewayclass-controller";
+                  provider = {
+                    type = "Kubernetes";
+                    kubernetes.deploy.type = "GatewayNamespace";
+                  };
+                  extensionApis = {
+                    enableEnvoyPatchPolicy = true;
+                    enableBackend = true;
+                  };
+                };
+              };
+            };
+          };
+
+          resources = {
+            gatewayClasses.envoy.spec.controllerName = "gateway.envoyproxy.io/gatewayclass-controller";
+
+            ciliumNetworkPolicies = {
+              allow-world-egress = {
+                metadata.annotations."argocd.argoproj.io/sync-wave" = "-1";
+                spec = {
+                  endpointSelector.matchLabels."k8s:io.kubernetes.pod.namespace" = "envoy-gateway-system";
+                  egress = [
+                    {
+                      toEntities = [ "world" ];
+                      toPorts = [
+                        {
+                          ports = [
+                            {
+                              port = "443";
+                              protocol = "TCP";
+                            }
+                            {
+                              port = "80";
+                              protocol = "TCP";
+                            }
+                            {
+                              port = "53";
+                              protocol = "UDP";
+                            }
+                          ];
+                        }
+                      ];
+                    }
+                  ];
+                };
+              };
+
+              allow-kube-apiserver-egress = {
+                metadata.annotations."argocd.argoproj.io/sync-wave" = "-1";
+                spec = {
+                  endpointSelector.matchLabels."k8s:io.kubernetes.pod.namespace" = "envoy-gateway-system";
+                  egress = [
+                    {
+                      toEntities = [ "kube-apiserver" ];
+                      toPorts = [
+                        {
+                          ports = [
+                            {
+                              port = "443";
+                              protocol = "TCP";
+                            }
+                            {
+                              port = "6443";
+                              protocol = "TCP";
+                            }
+                          ];
+                        }
+                      ];
+                    }
+                  ];
+                };
+              };
+
+              allow-certgen-to-kube-apiserver-egress = {
+                metadata.annotations."argocd.argoproj.io/sync-wave" = "-1";
+                spec = {
+                  endpointSelector.matchLabels."job-name" = "envoy-gateway-helm-certgen";
+                  egress = [
+                    {
+                      toEntities = [ "kube-apiserver" ];
+                      toPorts = [
+                        {
+                          ports = [
+                            {
+                              port = "443";
+                              protocol = "TCP";
+                            }
+                            {
+                              port = "6443";
+                              protocol = "TCP";
+                            }
+                          ];
+                        }
+                      ];
+                    }
+                  ];
+                };
+              };
+            };
+          };
+        };
+
+        # Gateway proxy — per-domain listeners, EnvoyProxy config, ReferenceGrant
+        applications.envoy-gateway-proxy = {
+          namespace = "gateways";
+
+          syncPolicy = {
+            syncOptions = {
+              clientSideApplyMigration = false;
+              serverSideApply = true;
+            };
+          };
+
+          resources = {
+            gateways.default-gateway.spec = {
+              gatewayClassName = "envoy";
+              infrastructure.parametersRef = {
+                group = "gateway.envoyproxy.io";
+                kind = "EnvoyProxy";
+                name = "default-gateway-proxy-config";
+              };
+              listeners =
+                domains
+                |> mapAttrsToList (
+                  domain: args:
+                  let
+                    domainResourceName = resourceNameFor domain args;
+                  in
+                  [
+                    {
+                      name = "${domainResourceName}-http";
+                      protocol = "HTTP";
+                      port = 80;
+                      hostname = "*.${domain}";
+                      allowedRoutes.namespaces.from = "All";
+                    }
+                    {
+                      name = "${domainResourceName}-https";
+                      protocol = "HTTPS";
+                      port = 443;
+                      hostname = "*.${domain}";
+                      allowedRoutes.namespaces.from = "All";
+                      tls = {
+                        mode = "Terminate";
+                        certificateRefs = [
+                          {
+                            group = "";
+                            kind = "Secret";
+                            name = "${domainResourceName}-wildcard-tls";
+                            namespace = "certs";
+                          }
+                        ];
+                      };
+                    }
+                  ]
+                  ++ optional (args.apex or false) {
+                    name = "${domainResourceName}-apex-https";
+                    protocol = "HTTPS";
+                    port = 443;
+                    hostname = domain;
+                    allowedRoutes.namespaces.from = "All";
+                    tls = {
+                      mode = "Terminate";
+                      certificateRefs = [
+                        {
+                          group = "";
+                          kind = "Secret";
+                          name = "${domainResourceName}-wildcard-tls";
+                          namespace = "certs";
+                        }
+                      ];
+                    };
+                  }
+                )
+                |> flatten;
+            };
+
+            # The arr HTTPRoutes raise timeouts.request to 600s for slow anime
+            # interactive searches (Sonarr processes hundreds of releases). Envoy's
+            # per-stream idle timeout (5m default) is the next ceiling and would cut
+            # the held-open /api/v3/release response before the route timeout. Lift
+            # it gateway-wide just above the route timeout so the route timeout is
+            # the binding limit. This is a ceiling only: routes that don't raise
+            # their own request timeout still hit Envoy's 15s route default.
+            clientTrafficPolicies.long-search-stream-idle.spec = {
+              targetRefs = [
+                {
+                  group = "gateway.networking.k8s.io";
+                  kind = "Gateway";
+                  name = "default-gateway";
+                }
+              ];
+              timeout.http.streamIdleTimeout = "660s";
+            };
+
+            # Envoy Gateway 1.8 installs the OIDC SecurityPolicy oauth2 filter on the
+            # merged HTTPS listener's HCM as ENABLED-but-empty, supplying the real config
+            # per-OIDC-route via OAuth2PerRoute. Requests to OPEN routes that share an
+            # OIDC listener (coder/grafana/romm on *.json64.dev, argocd on *.zeroday.run)
+            # fall through to that empty base filter and segfault Envoy (null-deref),
+            # taking down the whole proxy and every OIDC app with it. Disable the base
+            # filter so open routes skip it; the per-route OAuth2PerRoute config re-enables
+            # it for the OIDC routes (Envoy's disabled-filter + per-route-enable pattern).
+            envoyPatchPolicies.oauth2-disable-empty-base.spec = {
+              targetRef = {
+                group = "gateway.networking.k8s.io";
+                kind = "Gateway";
+                name = "default-gateway";
+              };
+              type = "JSONPatch";
+              jsonPatches = [
+                {
+                  type = "type.googleapis.com/envoy.config.listener.v3.Listener";
+                  # EG merges every HTTPS listener section into one Envoy listener named
+                  # after the first cert-domain section (attrNames is sorted, so the
+                  # alphabetically-first domain). Derived, not hardcoded.
+                  name = "gateways/default-gateway/${ren.helpers.resourceForDomain (builtins.head (builtins.attrNames domains))}-https";
+                  operation = {
+                    op = "add";
+                    # Match the oauth2 filter by name in any filter chain (index-agnostic),
+                    # then append /disabled = true.
+                    jsonPath = ''.filter_chains[*].filters[*].typed_config.http_filters[?(@.name=="envoy.filters.http.oauth2")]'';
+                    path = "/disabled";
+                    value = true;
+                  };
+                }
+              ];
+            };
+
+            envoyProxies.default-gateway-proxy-config.spec = {
+              provider = {
+                type = "Kubernetes";
+                kubernetes = {
+                  envoyDeployment = {
+                    replicas = numReplicas;
+                    strategy.rollingUpdate = {
+                      maxSurge = 1;
+                    }
+                    // optionalAttrs (numReplicas == 1) {
+                      maxUnavailable = 0;
+                    };
+                    pod.topologySpreadConstraints = [
+                      {
+                        maxSkew = 1;
+                        topologyKey = "kubernetes.io/hostname";
+                        whenUnsatisfiable = "DoNotSchedule";
+                        labelSelector.matchLabels = {
+                          "app.kubernetes.io/name" = "envoy";
+                        };
+                        matchLabelKeys = [
+                          "pod-template-hash"
+                          "gateway.envoyproxy.io/owning-gateway-name"
+                          "gateway.envoyproxy.io/owning-gateway-namespace"
+                        ];
+                      }
+                    ];
+                  };
+                  envoyService = {
+                    type = "LoadBalancer";
+                    annotations."lbipam.cilium.io/ips" = default-gateway-address;
+                  };
+                };
+              };
+            };
+
+            referenceGrants.allow-gateway-to-cert-tls = {
+              metadata.namespace = "certs";
+              spec = {
+                from = [
+                  {
+                    group = "gateway.networking.k8s.io";
+                    kind = "Gateway";
+                    namespace = "gateways";
+                  }
+                ];
+                to =
+                  domains
+                  |> mapAttrsToList (
+                    domain: args: {
+                      group = "";
+                      kind = "Secret";
+                      name = "${resourceNameFor domain args}-wildcard-tls";
+                    }
+                  );
+              };
+            };
+
+            ciliumNetworkPolicies = {
+              allow-gateway-world-egress = {
+                metadata = {
+                  namespace = "gateways";
+                  annotations."argocd.argoproj.io/sync-wave" = "-1";
+                };
+                spec = {
+                  endpointSelector.matchLabels."gateway.networking.k8s.io/gateway-name" = "default-gateway";
+                  egress = [
+                    {
+                      toEntities = [ "world" ];
+                      toPorts = [
+                        {
+                          ports = [
+                            {
+                              port = "443";
+                              protocol = "TCP";
+                            }
+                            {
+                              port = "80";
+                              protocol = "TCP";
+                            }
+                            {
+                              port = "53";
+                              protocol = "UDP";
+                            }
+                          ];
+                        }
+                      ];
+                    }
+                  ];
+                };
+              };
+            };
+          };
+        };
+      };
+  };
+}

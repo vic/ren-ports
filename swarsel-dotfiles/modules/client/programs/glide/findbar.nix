@@ -1,0 +1,81 @@
+{ ren, inputs, ... }:
+let
+  sw = ren.helpers;
+in
+{
+  ren.aspects.glide.homeManager.programs.glide-browser.config = ''
+    function enforce_input_mode() {
+      if (glide.ctx.mode === "normal" && glide.findbar.is_focused()) {
+        void glide.excmds.execute("mode_change insert");
+      }
+    }
+
+    glide.autocmds.create("ModeChanged", "*:normal", enforce_input_mode);
+
+    let enforce_timer: ReturnType<typeof setInterval> | null = null;
+    function stop_enforce_polling() {
+      if (enforce_timer != null) {
+        clearInterval(enforce_timer);
+        enforce_timer = null;
+      }
+    }
+    function start_enforce_polling() {
+      if (enforce_timer != null) {
+        return;
+      }
+      enforce_timer = setInterval(() => {
+        if (!glide.findbar.is_open()) {
+          stop_enforce_polling();
+          return;
+        }
+        enforce_input_mode();
+      }, 100);
+    }
+
+    async function open_findbar() {
+      await glide.findbar.open({ query: "" });
+      start_enforce_polling();
+    }
+
+    glide.keymaps.set("normal", "/", open_findbar);
+    glide.keymaps.set("normal", "?", open_findbar);
+    glide.keymaps.set("normal", "n", async () => {
+      await glide.findbar.next_match();
+      start_enforce_polling();
+    });
+    glide.keymaps.set("normal", "N", async () => {
+      await glide.findbar.previous_match();
+      start_enforce_polling();
+    });
+
+    glide.keymaps.set(["insert", "normal", "visual", "op-pending"], "<Esc>", async () => {
+      if (glide.findbar.is_open()) {
+        await glide.findbar.close();
+      }
+      await glide.excmds.execute("blur");
+      await glide.excmds.execute("mode_change normal");
+    });
+
+    glide.keymaps.set("command", "<Esc>", () => void glide.commandline.close());
+
+    async function tab_or_tabopen(query: string) {
+      const url = query.includes("://") ? query : `https://''${query}`;
+      const tabs = await browser.tabs.query({ currentWindow: true });
+      const existing = tabs.find((t) => t.url != null && t.url.includes(query));
+      if (existing?.id != null) {
+        await browser.tabs.update(existing.id, { active: true });
+        return;
+      }
+      const { store } = await active_tab_info();
+      const rule = store == null ? null : match_rule(url);
+      if (rule != null && container_stores[rule.container] == null) {
+        await refresh_container_stores();
+      }
+      const target = rule != null ? container_stores[rule.container] : undefined;
+      const created = await browser.tabs.create({ url, cookieStoreId: target ?? store });
+      if (rule != null && target != null && created.id != null) {
+        placed.set(created.id, rule.container);
+      }
+    }
+  '';
+}

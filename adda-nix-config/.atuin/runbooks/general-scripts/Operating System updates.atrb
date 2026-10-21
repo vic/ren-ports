@@ -1,0 +1,321 @@
+id: 019a8c17-3995-7670-b5a6-5cd1c82552f0
+name: Operating System updates
+version: 1
+forkedFrom: null
+content:
+- id: f6596d68-4414-48f3-b502-eb54c9a00b17
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: Operating System updates
+    styles: {}
+  children: []
+- id: 2333e580-ba6e-4703-9780-46fc3e77259b
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: 'Update the local '
+    styles: {}
+  - type: text
+    text: nixpkgs
+    styles:
+      code: true
+  - type: text
+    text: ' '
+    styles: {}
+  children: []
+- id: b95a9d2e-a811-41e0-9c0b-173dc398f636
+  type: local-directory
+  props: {}
+  children: []
+- id: d42a9a5e-c75e-4aaa-a8b4-c594bc2e2115
+  type: run
+  props:
+    type: bash
+    name: Update the local `nixpkgs`
+    code: |-
+      jj git fetch --remote upstream --branch master --branch main
+      jj new master@upstream
+    pty: 76efdb00-0c9b-433e-a528-e6987c97b7d7
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: 5bbb6de3-ed81-4e95-916a-94111f612c6b
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: c0d2783f-6570-4028-a959-52e90f73ad5e
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: 'Update the local '
+    styles: {}
+  - type: text
+    text: home-manager
+    styles:
+      code: true
+  children: []
+- id: 019a8c8c-2c4d-7733-a732-c0c8e1c1f403
+  type: local-directory
+  props: {}
+  children: []
+- id: 73c9df9a-6768-4a3b-a797-da46a036625a
+  type: run
+  props:
+    type: bash
+    name: Update the local `home-manager`
+    code: |-
+      jj git fetch --remote upstream --branch master --branch main
+      jj new master@upstream
+    pty: 6268954d-5b74-42a7-ba70-4b943c28d920
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: 010fd8c6-0108-43e1-850d-1fb44a406c79
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: c31d24a6-969a-45c8-a719-051842972aea
+  type: local-directory
+  props: {}
+  children: []
+- id: a6a0e830-ac7b-4fcf-827a-98017717a4ac
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: 'Update the '
+    styles: {}
+  - type: text
+    text: flake.{nix,lock}
+    styles:
+      code: true
+  children: []
+- id: 06deada7-45bc-4631-bab1-aa2d3d2a518e
+  type: script
+  props:
+    interpreter: /run/current-system/sw/bin/fish --interactive
+    outputVariable: ''
+    name: Update flake
+    code: |-
+      nix run .#write-flake
+      nix flake update
+      nix run .#write-files
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: e6650fcf-fd22-459f-af64-31f5c061232c
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: Update the system
+    styles: {}
+  children: []
+- id: 4605222a-e8e9-451d-80b1-3fd9bcebd210
+  type: dropdown
+  props:
+    name: rebuildMode
+    options: Enable new OS on next boot:boot, Switch to new OS immediately:switch
+    fixedOptions: Enable new OS on next boot:boot, Switch to new OS immediately:switch
+    variableOptions: ''
+    commandOptions: ''
+    value: switch
+    optionsType: fixed
+    interpreter: bash
+    delimiter: ':'
+  children: []
+- id: a69076ef-c3ca-4c95-9be0-eda142af50fe
+  type: run
+  props:
+    type: bash
+    name: Rebuild the system
+    code: nh os {{var.rebuildMode}} -- --impure
+    pty: 44b39172-6ca1-447e-b6d0-9423f4cd3b43
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: 98b98e69-8d9d-4518-b9a7-d64295c80412
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: Flatpak update
+    styles: {}
+  children: []
+- id: 633ab6b3-da6e-41ad-8075-4ef37bacd26e
+  type: script
+  props:
+    interpreter: /run/current-system/sw/bin/fish --interactive
+    outputVariable: ''
+    name: Script 2
+    code: flatpak update --assumeyes
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: 06334717-0d97-4e16-a287-d1a136ee528f
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: Renew Tailscale Caddy Auth key
+    styles: {}
+  children: []
+- id: c0e1819e-34a7-4b10-8e94-7e67831e10ec
+  type: numberedListItem
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: 'Create a new AUTH key: '
+    styles: {}
+  - type: link
+    href: https://login.tailscale.com/admin/settings/keys
+    content:
+    - type: text
+      text: https://login.tailscale.com/admin/settings/keys
+      styles: {}
+  - type: text
+    text: .
+    styles: {}
+  children: []
+- id: 216bd9d0-dad7-4043-b9e1-087947f94d44
+  type: numberedListItem
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: Add Auth key to the SOPS-encrypted config file.
+    styles: {}
+  children: []
+- id: 02733feb-8c79-4e9e-bf3f-b17a22b63fd6
+  type: run
+  props:
+    type: bash
+    name: Add Auth key to the SOPS-encrypted config file
+    code: sops secrets/services-tailscale-tsauthkey.env
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: 563bf8da-c4ff-43bd-8461-daa90fb19a44
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: Renew FlakeHub tokens for determinate-nixd
+    styles: {}
+  children: []
+- id: b91363dc-186c-41ec-a5ca-c569bbdc974e
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: 'Regenerate tokens: '
+    styles: {}
+  - type: link
+    href: https://flakehub.com/user/settings?editview=tokens
+    content:
+    - type: text
+      text: https://flakehub.com/user/settings?editview=tokens
+      styles: {}
+  - type: text
+    text: .
+    styles: {}
+  children: []
+- id: 1593092f-f71d-4667-a1fb-b66f43053bd2
+  type: run
+  props:
+    type: bash
+    name: Renew login on all machines
+    code: determinate-nixd login
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: 82642c34-ccc7-4764-9522-89e4dc171f9b
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: 62828030-7ca5-42b3-8e33-e2e6f6b609e4
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []

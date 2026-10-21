@@ -1,0 +1,85 @@
+id: 019aaf80-e32e-7d21-80d5-ce95bf1b0624
+name: Valgrind
+version: 1
+content:
+- id: f6596d68-4414-48f3-b502-eb54c9a00b17
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: Valgrind
+    styles: {}
+  children: []
+- id: e534b636-3a4c-4624-b052-8a40200cfabb
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: valgrind --tool=callgrind && callgrind_annotate callgrind.out.* wordcount.c
+    styles:
+      code: true
+  - type: text
+    text: ' '
+    styles: {}
+  - type: text
+    text: valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose ./application_name
+    styles:
+      code: true
+  children: []
+- id: 31f1dc09-45bb-4605-b3c8-91eb1e4cfeab
+  type: bulletListItem
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: -main-stacksize=
+    styles: {}
+  children: []
+- id: 3451e5ee-5614-4a1d-81ba-e452a44c7580
+  type: bulletListItem
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: -main-stackframe kcachegrind callgrind.out
+    styles: {}
+  children: []
+- id: 2a9267de-aee7-48ca-97c5-e41b047ae9ef
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: de655242-6cc4-4405-9d24-8743be0841b1
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: Rychejlsi nez valgrind Prej Dr Memory je rychlejší, nebo leaksan/asan
+    styles: {}
+  children: []
+- id: c0466377-7055-4e99-b268-ca0c797b68e5
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []

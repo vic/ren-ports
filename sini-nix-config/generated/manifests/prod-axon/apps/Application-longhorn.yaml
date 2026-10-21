@@ -1,0 +1,35 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  annotations:
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+  name: longhorn
+  namespace: argocd
+spec:
+  destination:
+    namespace: longhorn-system
+    server: https://kubernetes.default.svc
+  ignoreDifferences:
+    - group: longhorn.io
+      kind: BackupTarget
+      managedFieldsManagers:
+        - longhorn-manager
+      name: default
+      namespace: longhorn-system
+    - group: apiextensions.k8s.io
+      jqPathExpressions:
+        - .metadata.labels."app.kubernetes.io/version"
+        - .metadata.labels."app.kubernetes.io/managed-by"
+        - .metadata.labels."helm.sh/chart"
+      kind: CustomResourceDefinition
+  project: default
+  source:
+    path: ./generated/manifests/prod-axon/longhorn
+    repoURL: https://github.com/sini/nix-config.git
+    targetRevision: main
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

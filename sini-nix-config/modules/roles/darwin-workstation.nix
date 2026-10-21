@@ -1,0 +1,43 @@
+{ ren, ... }:
+{
+  ren.aspects.darwin-workstation = {
+    includes = with ren.aspects; [
+      desktop-style-stylix
+      macos-fonts-darwin
+      macos-homebrew
+      macos-spotlight-apps-homeDarwin
+      macos-applications-karabiner
+      macos-defaults-keyboard-darwin
+      macos-defaults-dock-darwin
+      macos-defaults-finder-darwin
+      macos-defaults-trackpad-darwin
+      macos-defaults-appearance-darwin
+      macos-defaults-keybindings-homeDarwin
+      macos-defaults-screencapture
+      macos-defaults-security-darwin
+      macos-wm-aerospace-homeDarwin
+      macos-wm-jankyborders-homeDarwin
+      macos-wm-sketchybar-homeDarwin
+      macos-applications-raycast
+      app-browsers-firefox
+      app-browsers-chromium
+      app-terminals-kitty
+      app-terminals-alacritty
+      dev-editor-codium-vscode
+      dev-editor-codium-core
+      dev-lang-c
+      dev-lang-go
+      dev-lang-lua
+      dev-lang-markdown
+      dev-lang-nix
+      dev-lang-python
+      dev-lang-shell
+      dev-git-gitkraken
+      dev-networking-wireshark
+      dev-security-opkssh-client
+      app-productivity-obsidian
+      app-productivity-obs-studio
+      app-mail-protonmail
+    ];
+  };
+}

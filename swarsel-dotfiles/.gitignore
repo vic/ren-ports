@@ -1,0 +1,14 @@
+secrets/keys/pubring.kbx
+secrets/keys/private-keys-v1.d/
+files/install/flake.lock
+result
+*.~undo-tree~
+*.iso
+*.bak
+.pre-commit-config.yaml
+.direnv
+/site/
+.terraform
+*.tfstate
+*.tfstate.backup
+*.qcow2

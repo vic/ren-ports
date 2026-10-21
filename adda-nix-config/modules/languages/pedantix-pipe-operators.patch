@@ -1,0 +1,118 @@
+diff --git a/src/syntax.rs b/src/syntax.rs
+index 45e4b37..6581851 100644
+--- a/src/syntax.rs
++++ b/src/syntax.rs
+@@ -1,13 +1,47 @@
+ use anyhow::{Result, anyhow, bail};
+ use tree_sitter::{Node, Parser};
+ 
++/// RFC 148 pipe operators. tree-sitter-nix does not know them, so every file
++/// using one parses with ERROR nodes and pedantix refuses to touch it.
++const PIPE_OPERATORS: [&[u8; 2]; 2] = [b"|>", b"<|"];
++
++/// Stand-in the grammar does know: `->` is a binary operator of the same two-byte
++/// width and of the lowest precedence in the grammar, so the masked tree has the
++/// same node extents and (bar associativity, which nothing here inspects) the same
++/// shape as the pipeline it stands for.
++const PIPE_MASK: &[u8; 2] = b"->";
++
++/// Rewrite every pipe operator to `PIPE_MASK`, or `None` when the source has none.
++///
++/// Byte-for-byte length preserving, so node offsets of the masked parse index the
++/// *original* source — which is what every pass splices its output from, and what
++/// `semantic::canon` reads token text from, so pipes stay distinguishable there.
++/// `|` and `<` followed by `|` cannot occur in Nix outside a pipe operator except
++/// inside strings and comments, where masking changes no token boundary.
++fn mask_pipe_operators(src: &str) -> Option<String> {
++    let mut masked = src.as_bytes().to_vec();
++    let mut found = false;
++    let mut i = 0;
++    while i + 1 < masked.len() {
++        if PIPE_OPERATORS.contains(&&[masked[i], masked[i + 1]]) {
++            masked[i..i + 2].copy_from_slice(PIPE_MASK);
++            found = true;
++            i += 2;
++        } else {
++            i += 1;
++        }
++    }
++    found.then(|| String::from_utf8(masked).expect("masking keeps the input valid UTF-8"))
++}
++
+ pub fn parse(src: &str) -> Result<tree_sitter::Tree> {
++    let masked = mask_pipe_operators(src);
+     let mut parser = Parser::new();
+     parser
+         .set_language(&tree_sitter_nix::LANGUAGE.into())
+         .expect("tree-sitter-nix language is compatible");
+     parser
+-        .parse(src, None)
++        .parse(masked.as_deref().unwrap_or(src), None)
+         .ok_or_else(|| anyhow!("tree-sitter failed to parse input"))
+ }
+ 
+@@ -311,3 +345,31 @@ where
+     out.push_str(&src[pos..node.end_byte()]);
+     out
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const PIPED: &str = "{ xs = [ 1 2 ] |> map (x: x + 1) ; y = builtins.length <| [ 1 ]; }\n";
++
++    #[test]
++    fn sources_without_pipes_are_not_masked() {
++        assert!(mask_pipe_operators("{ a = { x = 1; } // { y = 2; }; }").is_none());
++    }
++
++    #[test]
++    fn pipelines_parse_and_keep_the_original_offsets() {
++        let tree = parse_valid(PIPED, "test").expect("pipelines parse");
++        let mut found = Vec::new();
++        let mut stack = vec![tree.root_node()];
++        while let Some(node) = stack.pop() {
++            if node.kind() == "list_expression" {
++                found.push(text(node, PIPED).to_string());
++            }
++            let mut cursor = node.walk();
++            stack.extend(node.children(&mut cursor));
++        }
++        found.sort();
++        assert_eq!(found, vec!["[ 1 2 ]".to_string(), "[ 1 ]".to_string()]);
++    }
++}
+diff --git a/tests/pipeline.rs b/tests/pipeline.rs
+index 2f842bb..4ffb793 100644
+--- a/tests/pipeline.rs
++++ b/tests/pipeline.rs
+@@ -352,3 +352,28 @@ fn format_passes_can_be_disabled() {
+     };
+     assert_eq!(process(src, &neither).unwrap(), "{ a = 2; b = 1; }\n");
+ }
++
++#[test]
++fn pipe_operators_are_sorted_and_preserved() {
++    if !have("nixfmt") {
++        eprintln!("skipping: nixfmt not on PATH");
++        return;
++    }
++    let src =
++        "{\n  b = { y = 2; x = 1; } |> builtins.attrNames;\n  a = builtins.length <| [ 1 2 ];\n}\n";
++    let cfg = Config::default();
++    let once = process(src, &cfg).unwrap();
++    assert_eq!(fingerprint(src).unwrap(), fingerprint(&once).unwrap());
++    assert!(once.contains("|>") && once.contains("<|"), "{once}");
++    let a = once.find("a =").expect("a binding");
++    let b = once.find("b =").expect("b binding");
++    assert!(
++        a < b,
++        "top-level attrs stay sorted around pipelines: {once}"
++    );
++    assert_eq!(
++        once,
++        process(&once, &cfg).unwrap(),
++        "not idempotent: {once}"
++    );
++}

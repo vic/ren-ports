@@ -1,0 +1,9 @@
+/result
+/result.*
+.direnv
+.cache
+.claude
+CLAUDE.md
+docs/superpowers/
+.pre-commit-config.yaml
+/.panix

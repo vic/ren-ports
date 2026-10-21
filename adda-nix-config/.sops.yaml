@@ -1,0 +1,76 @@
+keys:
+  - &adda-fulgur-nixos age16eyrwrmja8ud05xvegul58g6em42lq54clzpj0htvsk74kqr7qxq38h5eh
+  - &host-fulgur-nixos age14x74ju8genqe2eusgclcwsr64gwh49cy6rvr0rxqlhg5pcaaeazsnw0v67
+  - &adda-mensa-nixos age162ejdfctmchh63f99k7vxvt3g09p6d8vh2jj93tcke7m6ef88pnsysf2nx
+  - &host-mensa-nixos age1uccvqhyw2h6v3x5yk3wrds789qfej2szu4d35w4r8pvr7erakvgqf8f8fe
+  - &adda-nomen-nixos age1t852crmxvzvgypreycmay25l4jvskh4mclcxatl29989xvtkdsqqxr7n6a
+  - &host-nomen-nixos age10yqx7fjl73ahs2tekqjsw47m3xju4svwd06en20e76kck3dsxu7qyvqng6
+  # The work VMs (fabrica-nixos and its clone harena-nixos) are shared with colleagues:
+  #  only the *host* key is listed (derived from /etc/ssh/ssh_host_ed25519_key.pub with
+  #  `ssh-to-age`), never an `adda-fabrica-nixos` user key — secrets are never edited
+  #  from those machines, and the account there has no personal SSH key to derive one
+  #  from anyway.
+  # One anchor covers both only because harena-nixos was cloned block-for-block and kept
+  #  fabrica-nixos' host key. Regenerate that key on either VM (`ssh-keygen -A` after
+  #  deleting /etc/ssh/ssh_host_*) and its age key has to be added here as a second
+  #  anchor, followed by `just sops-update secrets/gh-fabrica.yaml` — otherwise that
+  #  host's sops activation fails and `gh` loses its credentials.
+  - &host-fabrica-nixos age14dk55gpf5cxjy26gdvwseyrz0lespcz08ygnwgpcpjhn4k3dz5nskzu0wx
+creation_rules:
+  # Must stay above the catch-all below: sops uses the *first* matching rule. The CERIT-SC
+  #  gateway key is consumed only by mensa-nixos' LiteLLM proxy
+  #  (modules/aspects/services/litellm.nix); the agents on every host, the work VMs
+  #  included, reach CERIT through that proxy and no longer decrypt this file. The
+  #  host-fabrica-nixos recipient is left over from when they did: dropping it needs
+  #  `just sops-update secrets/cerit.yaml`, and only helps together with rotating the key,
+  #  since older revisions of the file stay decryptable by that host.
+  - path_regex: secrets/cerit\.yaml$
+    key_groups:
+    - age:
+      - *adda-fulgur-nixos
+      - *host-fulgur-nixos
+      - *adda-mensa-nixos
+      - *host-mensa-nixos
+      - *adda-nomen-nixos
+      - *host-nomen-nixos
+      - *host-fabrica-nixos
+
+  # The work VMs' GitHub token. Anything decrypted there is readable by the other admins who have root on those
+  # machines. This file is meant to hold a scoped token issued for them alone, so a compromise costs exactly that token;
+  # fabrica-nixos and harena-nixos share it because they are the same work environment with the same admins. Only Adda's
+  # *user* keys are listed besides the host key: his own hosts never read this file, they only need to be able to edit it
+  # (`sops secrets/gh-fabrica.yaml`).
+  - path_regex: secrets/gh-fabrica\.yaml$
+    key_groups:
+    - age:
+      - *adda-fulgur-nixos
+      - *adda-mensa-nixos
+      - *adda-nomen-nixos
+      - *host-fabrica-nixos
+
+  # What the agents need to call the LiteLLM proxy: a single virtual key, nothing else. Kept out of
+  #  secrets/litellm.yaml on purpose — that file also holds the proxy's master and salt keys, which no client may
+  #  read. This one carries exactly the key a client is allowed to hold, so it can be handed to the shared work VMs
+  #  (host-fabrica-nixos, which harena-nixos shares) without exposing proxy administration to them.
+  - path_regex: secrets/litellm-client\.yaml$
+    key_groups:
+    - age:
+      - *adda-fulgur-nixos
+      - *host-fulgur-nixos
+      - *adda-mensa-nixos
+      - *host-mensa-nixos
+      - *adda-nomen-nixos
+      - *host-nomen-nixos
+      - *host-fabrica-nixos
+
+  - path_regex: secrets/[^/]+\.(yaml|json|env|ini)$
+    key_groups:
+    - pgp:
+      # - *adda-XYZ
+      age:
+      - *adda-fulgur-nixos
+      - *host-fulgur-nixos
+      - *adda-mensa-nixos
+      - *host-mensa-nixos
+      - *adda-nomen-nixos
+      - *host-nomen-nixos

@@ -1,0 +1,143 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: whisparr
+    app.kubernetes.io/name: whisparr
+  name: whisparr
+  namespace: media
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: whisparr
+      app.kubernetes.io/name: whisparr
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/configMaps: 04c430505f2884badf20c03bb973b25cabfc77600c4a58733031c6f41688a228
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: whisparr
+        app.kubernetes.io/name: whisparr
+        den.observability/file-tailed: "true"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/config/.alloy
+            - --server.http.listen-addr=127.0.0.1:12345
+          image: docker.io/grafana/alloy@sha256:2aa2099af76c0098d4af7a4d6e48f86cb66dc1a000222ad927a1c67c6542d13f
+          name: logtail
+          securityContext:
+            runAsGroup: 65536
+            runAsUser: 1027
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /data
+              name: data
+            - mountPath: /etc/alloy/config.alloy
+              name: logtail
+              readOnly: true
+              subPath: config.alloy
+            - mountPath: /config/MediaCover
+              name: metadata
+              subPath: media/metadata/whisparr/MediaCover
+            - mountPath: /scratch
+              name: scratch
+        - env:
+            - name: PGID
+              value: "65536"
+            - name: PUID
+              value: "1027"
+            - name: TZ
+              value: America/Los_Angeles
+            - name: WHISPARR__AUTH__APIKEY
+              valueFrom:
+                secretKeyRef:
+                  key: whisparr
+                  name: media-arr-api-keys
+            - name: WHISPARR__AUTH__METHOD
+              value: External
+            - name: WHISPARR__LOG__ROTATE
+              value: "2"
+            - name: WHISPARR__LOG__SIZELIMIT
+              value: "1"
+            - name: WHISPARR__POSTGRES__HOST
+              value: media-pg-rw
+            - name: WHISPARR__POSTGRES__LOGDB
+              value: whisparr-log
+            - name: WHISPARR__POSTGRES__MAINDB
+              value: whisparr-main
+            - name: WHISPARR__POSTGRES__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: media-pg-whisparr-password
+            - name: WHISPARR__POSTGRES__PORT
+              value: "5432"
+            - name: WHISPARR__POSTGRES__USER
+              valueFrom:
+                secretKeyRef:
+                  key: username
+                  name: media-pg-whisparr-password
+          image: ghcr.io/hotio/whisparr@sha256:4cbc45dcdf9e41e00a3c4ab8d6b0150731e6113018d27489f6960e43022d1b27
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /ping
+              port: 6969
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          name: main
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /ping
+              port: 6969
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /data
+              name: data
+            - mountPath: /config/MediaCover
+              name: metadata
+              subPath: media/metadata/whisparr/MediaCover
+            - mountPath: /scratch
+              name: scratch
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      serviceAccountName: whisparr
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: whisparr
+        - name: data
+          persistentVolumeClaim:
+            claimName: media-data-nfs
+        - configMap:
+            name: whisparr
+          name: logtail
+        - name: metadata
+          persistentVolumeClaim:
+            claimName: media-data-nfs
+        - name: scratch
+          persistentVolumeClaim:
+            claimName: media-scratch-nfs

@@ -1,0 +1,86 @@
+#!/usr/bin/env just --justfile
+
+# Set Nushell as the execution shell.
+set shell := [ "nu", "--commands" ]
+
+# Just running `just` shows the list of recipes.
+# FIXME: Uncomment when just v1.52 is installed.
+# set default-list := true
+
+set dotenv-load
+set lazy
+set positional-arguments
+set unstable
+
+host := `hostname`
+
+mod flake
+alias check := flake::check
+alias c := flake::check
+
+update:
+  system-update
+
+clean:
+  system-clean
+
+mod host
+
+alias s := switch
+[default]
+switch *ARGS:
+  nh os switch {{ARGS}}
+
+alias b := boot
+boot *ARGS:
+  nh os boot {{ARGS}}
+
+alias bd := build
+build *ARGS:
+  nh os build {{ARGS}}
+
+alias t := test
+test *ARGS:
+  nh os test {{ARGS}}
+
+alias f := fmt
+fmt *ARGS:
+  nix fmt {{ARGS}}
+
+# TODO: Implement.
+ci:
+  @ error make "Unimplemented"
+
+alias h := help
+help:
+  just --list --justfile {{justfile()}}
+
+alias g := generate
+generate *ARGS:
+  nix run .#generate-files {{ARGS}}
+
+# OpenTofu for the tailnet (Tofunix-generated config; cds into terraform/tailscale/ itself,
+# exports credentials from sops when direnv has not). e.g. `just tofu validate`, `just tofu apply -auto-approve`.
+alias tf := tofu
+tofu *ARGS:
+  nix run .#tofunix -- {{ARGS}}
+
+alias sou := sops-update
+sops-update FILE="secrets/*":
+    sops updatekeys --yes {{FILE}}
+
+alias su := system-update
+system-update: generate flake::update switch
+
+alias ge := generations
+generations *ARGS:
+  nh os info {{ARGS}}
+
+alias r := repl
+repl *ARGS:
+  nh os repl {{ARGS}}
+
+fwupd:
+  fwupdmgr refresh
+  fwupdmgr update
+  @echo You should reboot now: sudo reboot

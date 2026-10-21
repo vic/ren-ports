@@ -1,0 +1,65 @@
+id: 019f3b62-a608-7662-b7b7-43faf8bb505a
+name: ProtonVPN
+version: 1
+forkedFrom: null
+content:
+- id: f6596d68-4414-48f3-b502-eb54c9a00b17
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: ProtonVPN
+    styles: {}
+  children: []
+- id: c0de1210-5674-47ad-bfeb-825eee4d0791
+  type: directory
+  props:
+    path: ~/.nixos-config
+  children: []
+- id: e737ea20-e3d9-45d8-a88a-3a6a200274dc
+  type: script
+  props:
+    interpreter: /run/current-system/sw/bin/fish --interactive
+    outputVariable: ''
+    name: Connect
+    code: |-
+      tailscale down
+      protonvpn connect
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 12
+  children: []
+- id: f4b11fb5-efdb-4ebe-9a27-fea58f4529d8
+  type: script
+  props:
+    interpreter: /run/current-system/sw/bin/fish
+    outputVariable: ''
+    name: Disconnect
+    code: |-
+      protonvpn disconnect
+      tailscale up
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 12
+  children: []
+- id: 1258498c-26a5-48f3-93b6-690fbbb6ce1f
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: a71aac5b-47aa-42fa-9b22-420f6358548b
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []

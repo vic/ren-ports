@@ -1,0 +1,237 @@
+{ ren, ... }:
+{
+  ren.host.cortex = {
+    system = ren.system.x86_64-linux;
+    channel = ren.channel.nixos-unstable;
+    environment = ren.environment.dev;
+    system-owner = ren.user.sini;
+    system-access-groups = [ ren.group.workstation-access ];
+
+    networking.interfaces.enp8s0 = {
+      ipv4 = [ "10.9.2.1/16" ];
+      ipv6 = [ "fd64:0:1::5/64" ];
+      # br0 adopts this, so the address the router has always known for cortex
+      # is unchanged by bridging -- and identical at netboot, where the NIC
+      # answers for itself.
+      mac = "10:ff:e0:b6:6b:2b";
+    };
+
+    # enp8s0 moves into br0 and the addressing above rides on the bridge. The
+    # name matters: the networking aspect matches `vm-*` into br0, so every
+    # microvm tap enslaves itself and guests land directly on the LAN.
+    networking.bridges.br0 = [ "enp8s0" ];
+
+    # cortex-cuda is delivered as a CHILD host: resolved under cortex inheriting
+    # the curated host.includes (agenix retargeted, core.users, collect pipes,
+    # guest-os home-env) and routed into microvm.vms.cortex-cuda.config. The
+    # GPU passthrough/vfio/arbitration overlay is layered host-side by
+    # virtualization/microvm-guests.nix.
+    guests = [ ren.guest.cortex-cuda ];
+
+    disk-zfs-disk-single.device_id = "/dev/disk/by-id/nvme-Samsung_SSD_990_PRO_4TB_S7KGNU0X704630A";
+    system-linux-kernel.optimization = "zen4";
+    impermanence = {
+      wipeRootOnBoot = true;
+      wipeHomeOnBoot = false;
+    };
+
+    dev-mux-herdr-pair.pairs.sini = [ "theutz" ];
+
+    # sini@bitstream <-> sini@cortex, authenticated by the xmsg CA (federation plan §6.7).
+    dev-ai-mcp-xmsg.federation.nodes.sini = { };
+  };
+
+  ren.aspects.cortex = {
+    at = ren.host.cortex;
+    includes = with ren.aspects; [
+      default
+      workstation
+      gaming
+      dev
+      dev-gui
+      media
+      messaging
+      nix-builder
+
+      hardware-cpu-amd
+      hardware-gpu-amd
+      hardware-gpu-nvidia-vfio
+      # A workstation, but up around the clock: monitored like a server.
+      svc-monitoring-prometheus-exporter
+      svc-alloy
+      hardware-performance
+      hardware-vr-amd
+      hardware-bigscreen-beyond
+
+      # desktop.hyprland
+      desktop-uwsm
+
+      disk-zfs-disk-single
+      boot-network-initrd
+
+      virtualization-microvm-host
+      virtualization-windows-vfio
+      virtualization-podman
+
+      svc-storage-media-data-share
+
+      app-media-easyeffects
+
+      dev-mux-herdr-pair
+    ];
+
+    nixos = {
+      facter.reportPath = ../../../hosts/cortex/facter.json;
+
+      # The cortex-cuda guest's own host key, copied (not symlinked: the guest
+      # cannot follow a link into /run/agenix) into the dir shared to it.
+      age.secrets.cortex-cuda-host-key = {
+        rekeyFile = ../../../.secrets/hosts/cortex-cuda/ssh_host_ed25519_key.age;
+        path = "${ren.helpers.hostKey.hostKeyShare}/ssh_host_ed25519_key";
+        symlink = false;
+        mode = "0400";
+      };
+      boot = {
+        kernelParams = [
+          "amd_3d_vcache.x3d_mode=cache"
+        ];
+
+        extraModprobeConfig = ''
+          options snd_usb_audio vid=0x1235 pid=0x8210 device_setup=1 quirk_flags=0x1
+        '';
+      };
+
+      services.pipewire.wireplumber.extraConfig = {
+        "10-disable-camera.conf" = {
+          "wireplumber.profiles".main."monitor.libcamera" = "disabled";
+        };
+
+        "60-dac-priority" = {
+          "monitor.alsa.rules" = [
+            {
+              matches = [
+                {
+                  "node.name" = "alsa_input.usb-Focusrite_Scarlett_2i2_USB_Y80HQQ415BC300-00.HiFi__Mic1__source";
+                }
+                {
+                  "node.name" = "alsa_output.usb-Topping_D10-00.pro-output-0";
+                }
+              ];
+              actions = {
+                update-props = {
+                  "priority.driver" = "3000";
+                  "priority.session" = "3000";
+                };
+              };
+            }
+          ];
+        };
+      };
+
+      home-manager.sharedModules = [
+        {
+          # wayland.windowManager.hyprland.settings = {
+          #   debug = {
+          #     full_cm_proto = true;
+          #   };
+
+          #   misc = {
+          #     vfr = true;
+          #     vrr = 3;
+          #     disable_xdg_env_checks = true;
+          #   };
+
+          #   render = {
+          #     direct_scanout = 1;
+          #     cm_enabled = true;
+          #     send_content_type = true;
+          #     cm_fs_passthrough = 1;
+          #     cm_auto_hdr = 2;
+          #     expand_undersized_textures = false;
+          #     cm_sdr_eotf = 0;
+          #     non_shader_cm = 2;
+          #   };
+
+          #   general = {
+          #     allow_tearing = true;
+          #   };
+
+          #   quirks = {
+          #     prefer_hdr = 2;
+          #   };
+
+          #   monitorv2 = [
+          #     {
+          #       output = "DP-1";
+          #       mode = "3840x2160@120.00";
+          #       position = "0x0";
+          #       scale = 1;
+          #       bitdepth = 10;
+          #     }
+          #     {
+          #       output = "DP-2";
+          #       mode = "2560x1440@165.00";
+          #       position = "-1440x0";
+          #       scale = 1;
+          #       vrr = true;
+          #       transform = 1;
+          #     }
+          #     {
+          #       output = "HDMI-A-1";
+          #       mode = "2560x2880@60.00";
+          #       position = "3840x0";
+          #       scale = 1.33;
+          #       vrr = false;
+          #       bitdepth = 10;
+          #     }
+          #   ];
+          # };
+          xdg.configFile = {
+            "easyeffects/autoload/output/alsa_output.usb-Topping_D10-00.pro-output-0.json".text =
+              builtins.toJSON
+                {
+                  device = "alsa_output.usb-Topping_D10-00.pro-output-0";
+                  device-description = "Created by Home Manager";
+                  device-profile = "[Out] Headphones";
+                  preset-name = "HD650-Harmon";
+                };
+            "easyeffects/autoload/output/bluez_output.38_8F_30_F0_D1_9D.1.json".text = builtins.toJSON {
+              device = "bluez_output.38_8F_30_F0_D1_9D.1";
+              device-description = "Created by Home Manager";
+              device-profile = "headset-output";
+              preset-name = "GalaxyBuds";
+            };
+          };
+        }
+      ];
+    };
+
+  };
+
+  ren.aspects.cortex-sini = {
+    at = ren.lib.and [
+      ren.user.sini
+      (ren.lib.within ren.host.cortex)
+    ];
+    includes = with ren.aspects; [
+      # applications.wayland.waybar
+      # applications.wayland.swaync
+      # applications.wayland.hypridle
+      # applications.wayland.hyprland-split-monitors
+      app-media-spotify-player
+      svc-ai-genie-memory-loader
+    ];
+  };
+
+  ren.aspects.cortex-shuo = {
+    at = ren.lib.and [
+      ren.user.shuo
+      (ren.lib.within ren.host.cortex)
+    ];
+    includes = with ren.aspects; [
+      app-browsers-firefox
+      app-gaming-steam
+      app-media-spicetify
+    ];
+  };
+}

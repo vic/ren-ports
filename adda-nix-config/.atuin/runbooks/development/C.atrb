@@ -1,0 +1,87 @@
+id: 019b4bd8-e9f0-7fa2-9cc0-35865d6bec73
+name: C++
+version: 1
+forkedFrom: null
+content:
+- id: f6596d68-4414-48f3-b502-eb54c9a00b17
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: C++
+    styles: {}
+  children: []
+- id: 56718e91-33a5-46ac-86fe-ade6dce63274
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: Format with clang-format
+    styles: {}
+  children: []
+- id: 39add8ed-4c4f-4c13-a7ef-43335bf99cd2
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content:
+  - type: text
+    text: Configure options in `.clang-format` file.
+    styles: {}
+  children: []
+- id: 6adf9f28-a304-4106-93b3-78bd6ed28103
+  type: codeBlock
+  props:
+    language: text
+  content:
+  - type: text
+    text: |
+      # General configuration for all languages.
+
+      ---
+      Language: Cpp
+      BasedOnStyle: LLVM
+      IndentWidth: 4
+      TabWidth: 4
+      UseTab: Always
+    styles: {}
+  children: []
+- id: 9312743a-b879-42c4-8352-c2af6dd8362f
+  type: run
+  props:
+    type: bash
+    name: Format with clang-format
+    code: clang-format -i {include,src}/**/*.{cc,hh}
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: 407e97c0-f393-4208-a484-e1f5f1231764
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: 30bd3f34-0288-43fe-9045-c58b71305e9d
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []

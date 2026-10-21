@@ -1,0 +1,17 @@
+# DO-NOT-EDIT.
+# This file was auto-generated using github:sini/files.
+# Use `nix run .#write-files` to regenerate it.
+
+# Switch to a NixOS configuration.
+just switch
+
+# Switch #host to a NixOS configuration.
+just host::switch {{host}}
+
+# Build a NixOS configuration for a #host.
+just host::build {{host}}
+
+# Run the OS repl.
+just repl
+
+$ host: nu --commands ' nix eval --impure --expr "(builtins.attrNames (builtins.getFlake (toString ~/.nixos-config)).nixosConfigurations)" --json | from json | to text '

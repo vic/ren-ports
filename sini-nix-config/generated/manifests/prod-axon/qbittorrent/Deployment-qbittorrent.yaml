@@ -1,0 +1,291 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: qbittorrent
+    app.kubernetes.io/name: qbittorrent
+  name: qbittorrent
+  namespace: media
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: qbittorrent
+      app.kubernetes.io/name: qbittorrent
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/configMaps: 35e015fab4b9eb85ac502ac707e1a1dd29899d88e2825579cde273d4c4f1dda9
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: qbittorrent
+        app.kubernetes.io/name: qbittorrent
+        den.observability/file-tailed: "true"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - env:
+            - name: EXPORTER_LOG_LEVEL
+              value: WARNING
+            - name: EXPORTER_PORT
+              value: "9710"
+            - name: QBITTORRENT_HOST
+              value: localhost
+            - name: QBITTORRENT_PASS
+              value: ""
+            - name: QBITTORRENT_PORT
+              value: "8080"
+            - name: QBITTORRENT_USER
+              value: ""
+          image: ghcr.io/esanchezm/prometheus-qbittorrent-exporter@sha256:3e80be9b2e6bad50af7c47abf521b2db3980b2735f4621ef15f3e1867e171f86
+          name: exportarr
+          ports:
+            - containerPort: 9710
+              name: metrics
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /scratch
+              name: scratch
+        - args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/config/.alloy
+            - --server.http.listen-addr=127.0.0.1:12345
+          image: docker.io/grafana/alloy@sha256:2aa2099af76c0098d4af7a4d6e48f86cb66dc1a000222ad927a1c67c6542d13f
+          name: logtail
+          securityContext:
+            runAsGroup: 65536
+            runAsUser: 1027
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /etc/alloy/config.alloy
+              name: logtail
+              readOnly: true
+              subPath: config.alloy
+            - mountPath: /scratch
+              name: scratch
+        - env:
+            - name: PGID
+              value: "65536"
+            - name: PUID
+              value: "1027"
+            - name: TZ
+              value: America/Los_Angeles
+            - name: UMASK
+              value: "022"
+            - name: WEBUI_PORT
+              value: "8080"
+          image: linuxserver/qbittorrent@sha256:f6b1da8e425fc2c75487a737d6706451691c263fc3388a1164e1bf079e520125
+          name: main
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /scratch
+              name: scratch
+        - command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              GTN=http://127.0.0.1:8000/v1/portforward
+              QBT=http://127.0.0.1:8080
+              last=""
+              while true; do
+                # Compact-JSON assumption: gluetun's control server emits a single-line
+                # object like {"port":12345}; this sed grabs the first "port":<digits>. If
+                # gluetun ever pretty-prints the response, this extraction must change.
+                port="$(wget -qO- "$GTN" 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p' || true)"
+                if [ -z "${port:-}" ] || [ "${port}" = "0" ]; then
+                  echo "port-sync: no forwarded port from gluetun control server"
+                elif [ "${port}" = "${last}" ]; then
+                  : # steady state: port unchanged, nothing to push — stay quiet
+                else
+                  echo "port-sync: setting qBittorrent listen port to ${port}"
+                  if wget -qO- --post-data "json={\"listen_port\":${port},\"current_network_interface\":\"tun0\"}" \
+                      "$QBT/api/v2/app/setPreferences" >/dev/null 2>&1; then
+                    last="${port}"
+                  else
+                    echo "port-sync: setPreferences failed (qBittorrent not ready?), will retry"
+                  fi
+                fi
+                sleep 60
+              done
+          image: library/busybox@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
+          name: port-sync
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /scratch
+              name: scratch
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      initContainers:
+        - command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              INI=/config/qBittorrent/qBittorrent.conf
+              mkdir -p /config/qBittorrent
+              # A fresh pod can never legitimately hold the single-instance lock (RWO
+              # PVC, replicas=1). A stale lockfile from a prior pod makes qbt assume a
+              # running instance and exit 0 silently — crash-looping with zero output.
+              rm -f /config/qBittorrent/lockfile
+              ensure_key() {
+                # ensure_key <key-escaped-for-sed> <full-line>
+                # NB: $line lands in sed REPLACEMENT/append contexts, where a lone
+                # backslash is consumed (s|..|WebUI\X| emits WebUIX — this is what
+                # flattened the first deployment's keys on its second boot). Escape
+                # backslashes for those contexts.
+                key="$1"; line="$2"
+                escline=$(printf '%s' "$line" | sed 's|\\|\\\\|g')
+                if grep -q "^$key=" "$INI"; then
+                  sed -i "s|^$key=.*|$escline|" "$INI"
+                else
+                  sed -i "/^\[Preferences\]/a $escline" "$INI"
+                fi
+              }
+              # Same as ensure_key but for the [Application] section (FileLogger\*
+              # rotation keys live there, not under [Preferences]). Creates the
+              # section if absent. Idempotent.
+              ensure_app_key() {
+                key="$1"; line="$2"
+                escline=$(printf '%s' "$line" | sed 's|\\|\\\\|g')
+                grep -q '^\[Application\]' "$INI" || printf '\n[Application]\n' >> "$INI"
+                if grep -q "^$key=" "$INI"; then
+                  sed -i "s|^$key=.*|$escline|" "$INI"
+                else
+                  sed -i "/^\[Application\]/a $escline" "$INI"
+                fi
+              }
+              if [ ! -f "$INI" ]; then
+                echo "seeding fresh $INI"
+                {
+                  printf '%s\n' '[Application]'
+                  # Bound /config/qBittorrent/logs: rotate at MaxSizeBytes keeping a
+                  # bounded backup set; DeleteOld prunes the oldest. The file-tail
+                  # sidecar ships entries before they roll off.
+                  printf '%s\n' 'FileLogger\Backup=true'
+                  printf '%s\n' 'FileLogger\DeleteOld=true'
+                  printf '%s\n' 'FileLogger\MaxSizeBytes=1048576'
+                  printf '%s\n' 'FileLogger\Age=1'
+                  printf '%s\n' 'FileLogger\AgeType=1'
+                  printf '\n'
+                  printf '%s\n' '[Preferences]'
+                  printf '%s\n' 'WebUI\LocalHostAuth=false'
+                  printf '%s\n' 'WebUI\HostHeaderValidation=false'
+                } > "$INI"
+              else
+                echo "reconciling existing $INI"
+                grep -q '^\[Preferences\]' "$INI" || printf '[Preferences]\n' >> "$INI"
+                ensure_key 'WebUI\\LocalHostAuth' 'WebUI\LocalHostAuth=false'
+                # drop flattened leftovers from the earlier whitelist attempt
+                sed -i '/^WebUIAuthSubnetWhitelist/d; /^WebUIHostHeaderValidation/d' "$INI"
+                ensure_key 'WebUI\\HostHeaderValidation' 'WebUI\HostHeaderValidation=false'
+                # Bound the file logger (see fresh-seed comment above).
+                ensure_app_key 'FileLogger\\Backup' 'FileLogger\Backup=true'
+                ensure_app_key 'FileLogger\\DeleteOld' 'FileLogger\DeleteOld=true'
+                ensure_app_key 'FileLogger\\MaxSizeBytes' 'FileLogger\MaxSizeBytes=1048576'
+              fi
+          image: linuxserver/qbittorrent@sha256:f6b1da8e425fc2c75487a737d6706451691c263fc3388a1164e1bf079e520125
+          name: config-seed
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /scratch
+              name: scratch
+        - env:
+            - name: FIREWALL_INPUT_PORTS
+              value: 8080,9999,9710
+            - name: FIREWALL_OUTBOUND_SUBNETS
+              value: 172.20.0.0/16,172.21.0.0/16,10.10.10.0/24
+            - name: HEALTH_SERVER_ADDRESS
+              value: :9999
+            - name: VPN_PORT_FORWARDING
+              value: "on"
+            - name: VPN_PORT_FORWARDING_PROVIDER
+              value: protonvpn
+            - name: VPN_SERVICE_PROVIDER
+              value: custom
+            - name: VPN_TYPE
+              value: wireguard
+            - name: WIREGUARD_ADDRESSES
+              valueFrom:
+                secretKeyRef:
+                  key: addresses
+                  name: media-vpn
+            - name: WIREGUARD_ENDPOINT_IP
+              valueFrom:
+                secretKeyRef:
+                  key: endpoint-ip
+                  name: media-vpn
+            - name: WIREGUARD_ENDPOINT_PORT
+              valueFrom:
+                secretKeyRef:
+                  key: endpoint-port
+                  name: media-vpn
+            - name: WIREGUARD_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: private-key
+                  name: media-vpn
+            - name: WIREGUARD_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: peer-public-key
+                  name: media-vpn
+          image: qmcgaw/gluetun@sha256:2733bb22b27e3efa7a9f2cef9057ec12791b8b225793fcd3dbfd0508404dfc25
+          name: gluetun
+          readinessProbe:
+            failureThreshold: 30
+            httpGet:
+              path: /
+              port: 9999
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 1
+          restartPolicy: Always
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /gluetun/auth/config.toml
+              name: gluetun-auth
+              readOnly: true
+              subPath: config.toml
+            - mountPath: /scratch
+              name: scratch
+            - mountPath: /dev/net/tun
+              name: tun
+      serviceAccountName: qbittorrent
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: qbittorrent
+        - configMap:
+            name: qbittorrent-gluetun-auth
+          name: gluetun-auth
+        - configMap:
+            name: qbittorrent-logtail
+          name: logtail
+        - name: scratch
+          persistentVolumeClaim:
+            claimName: media-scratch-local
+        - hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+          name: tun

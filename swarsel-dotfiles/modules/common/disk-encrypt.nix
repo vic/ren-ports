@@ -1,0 +1,81 @@
+{ ren, inputs, ... }:
+let
+  sw = ren.helpers;
+in
+{
+  ren.aspects.disk-encrypt.nixos =
+    {
+      variant,
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
+    let
+
+      hostKeyPathBase = "/etc/secrets/initrd/ssh_host_ed25519_key";
+      hostKeyPath =
+        if config.swarselsystems.isImpermanence then
+          "/persist/${hostKeyPathBase}"
+        else
+          "${hostKeyPathBase}";
+
+      # this key is only used only for ssh to stage 1 in initial provisioning (in nix store)
+      generatedHostKey = pkgs.runCommand "initrd-hostkey" { } ''
+        ${pkgs.openssh}/bin/ssh-keygen -t ed25519 -N "" -f $out
+      '';
+    in
+    {
+      options.swarselsystems.networkKernelModules = lib.mkOption {
+        default = [ ];
+        type = lib.types.listOf lib.types.str;
+      };
+      config = lib.mkIf config.swarselsystems.isCrypted {
+        swarselsystems.enabledServerModules = [ "diskEncryption" ];
+        boot = lib.mkIf (!config.swarselsystems.isClient) {
+          # kernelParams = lib.mkIf (!config.swarselsystems.isCloud && ((config.swarselsystems.localVLANs == []) || isRouter)) [
+          #   "ip=${localIp}::${gatewayIp}:${subnetMask}:${config.networking.hostName}::none"
+          # ];
+          initrd = {
+            availableKernelModules = config.swarselsystems.networkKernelModules;
+            kernelModules = config.swarselsystems.networkKernelModules; # at least summers needs this to actually find the interfaces
+            network = {
+              enable = true;
+              flushBeforeStage2 = true;
+              ssh = {
+                enable = true;
+                authorizedKeys = [
+                  ''command="/bin/systemctl default" ${builtins.readFile "${inputs.self}/files/public/ssh/yubikey.pub"}''
+                  ''command="/bin/systemctl default" ${builtins.readFile "${inputs.self}/files/public/ssh/magicant.pub"}''
+                ];
+                hostKeys = [ "/tmp${hostKeyPathBase}" ]; # use a tmp file otherwise persist mount will be unhappy
+                port = 2222; # avoid hostkey changed nag
+              };
+            };
+            secrets."/tmp${hostKeyPathBase}" =
+              if variant.minimal then (lib.mkForce generatedHostKey) else (lib.mkForce hostKeyPath); # need to mkForce this or it behaves stateful
+            systemd.initrdBin = with pkgs; [
+              cryptsetup
+            ];
+          };
+        };
+        environment.persistence."/persist" =
+          lib.mkIf (config.swarselsystems.isImpermanence && (config.swarselsystems.isServer || variant.minimal))
+            {
+              files = [ hostKeyPathBase ];
+            };
+        # as soon as we hit a stable system, we will use a persisted key
+        # @future me: dont mkIf this to variant.minimal, we need to create this as soon as possible
+        system.activationScripts.ensureInitrdHostkey = {
+          deps = [
+            "users"
+          ]
+          ++ lib.optional config.swarselsystems.isImpermanence "createPersistentStorageDirs";
+          text = ''
+            [[ -e ${hostKeyPath} ]] || ${pkgs.openssh}/bin/ssh-keygen -t ed25519 -N "" -f ${hostKeyPath}
+          '';
+        };
+      };
+
+    };
+}

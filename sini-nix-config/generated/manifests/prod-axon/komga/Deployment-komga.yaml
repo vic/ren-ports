@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: komga
+    app.kubernetes.io/name: komga
+  name: komga
+  namespace: media
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: komga
+      app.kubernetes.io/name: komga
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/configMaps: cdcd503400afdf04205a7e8ec4bb87afd63620be933e6fd54bad95c67abb4add
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: komga
+        app.kubernetes.io/name: komga
+        den.observability/file-tailed: "true"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/config/.alloy
+            - --server.http.listen-addr=127.0.0.1:12345
+          image: docker.io/grafana/alloy@sha256:2aa2099af76c0098d4af7a4d6e48f86cb66dc1a000222ad927a1c67c6542d13f
+          name: logtail
+          securityContext:
+            runAsGroup: 0
+            runAsUser: 0
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /data
+              name: data
+            - mountPath: /etc/alloy/config.alloy
+              name: logtail
+              readOnly: true
+              subPath: config.alloy
+        - env:
+            - name: PGID
+              value: "65536"
+            - name: PUID
+              value: "1027"
+            - name: TZ
+              value: America/Los_Angeles
+          image: ghcr.io/gotson/komga@sha256:9fa656e8259bbd75c0f654bdfa91abf2b4813cbf4f40e80eb292495446ffdf1f
+          name: main
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /data
+              name: data
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      serviceAccountName: komga
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: komga
+        - name: data
+          persistentVolumeClaim:
+            claimName: media-data-nfs
+        - configMap:
+            name: komga
+          name: logtail

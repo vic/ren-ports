@@ -1,0 +1,262 @@
+# Cilium CNI — geneve tunnel, kube-proxy replacement, BGP control-plane,
+# BPF masquerade, IPAM cluster-pool, socket LB, CiliumNetworkPolicies.
+{ ... }:
+{
+  ren.aspects.k8s-network-cilium = {
+    crds =
+      { pkgs, lib, ... }:
+      let
+        # Reuse the cni plugin's pinned cilium checkout so the CRDs track the
+        # same version as the agent, with the GitHub source declared once (in
+        # pkgs/by-name/cni-plugin-cilium, bumped via `update-pkgs`). pkgs.local
+        # is provided by the flake's default overlay (see policies/clusters.nix).
+        src = pkgs.local.cni-plugin-cilium.src;
+        crds =
+          lib.concatMap
+            (
+              version:
+              let
+                path = "pkg/k8s/apis/cilium.io/client/crds/${version}";
+              in
+              lib.pipe (builtins.readDir "${src}/${path}") [
+                (lib.filterAttrs (_name: type: type == "regular"))
+                (lib.filterAttrs (name: _type: lib.hasSuffix ".yaml" name))
+                builtins.attrNames
+                (map (file: "${path}/${file}"))
+              ]
+            )
+            [
+              "v2"
+              "v2alpha1"
+            ];
+      in
+      {
+        name = "cilium";
+        inherit src crds;
+      };
+
+    k8s-manifests =
+      {
+        cluster,
+        charts,
+        environment,
+        lib,
+        ...
+      }:
+      let
+        podNetwork = cluster.networks.kubernetes-pods;
+        loadbalancerNetwork = cluster.networks.kubernetes-loadbalancers;
+        loadbalancer-cidr = loadbalancerNetwork.cidr;
+        inherit (cluster.k8s-network-cilium) devices;
+      in
+      {
+        applications.cilium = {
+          namespace = "kube-system";
+
+          annotations."argocd.argoproj.io/sync-wave" = "-2";
+
+          syncPolicy = {
+            syncOptions = {
+              serverSideApply = true;
+              applyOutOfSyncOnly = true;
+            };
+          };
+
+          compareOptions.serverSideDiff = true;
+
+          helm.releases.cilium = {
+            chart = charts.cilium.cilium;
+
+            values = {
+              namespaceOverride = "kube-system";
+
+              # Kernel 7.2 tightened bpf_set_retval's argument validation, so
+              # the agent's runtime probe for it — which passes the context
+              # pointer in R1 — is now rejected by the verifier, and cilium
+              # turns that unexpected error into a startup fatal: every agent
+              # crashloops and the node is left without a CNI. Fixed upstream by
+              # b73ca6e8d, which detects the helper via CO-RE instead; it sits
+              # on the v1.20 branch 21 commits past v1.20.1 and is in no release
+              # yet (cilium/cilium#48016). Run the agent from the branch build
+              # until the chart carries v1.20.2.
+              image.override = "quay.io/cilium/cilium-ci:cb24a125d75532b4be7f2e70ee774f57be9a19ec@sha256:1729a8cd055e10f650526587eaed4ed8fc294162c132b20643c01dff1e0c67b7";
+
+              # Cluster identity
+              cluster = {
+                inherit (environment) name;
+                inherit (environment) id;
+              };
+
+              # Routing — geneve tunnel. MTU is the BASE device MTU; cilium
+              # subtracts the geneve overhead itself (pods route at 1450).
+              # It must be explicit: auto-detection takes the minimum across
+              # all managed devices and tailscale0 (1280) drags it down,
+              # while a tunnel-adjusted value like the original 1450
+              # double-subtracts — pods routed at 1400 and the datapath
+              # emitted frag-needed for any host flow above it, stalling
+              # GRO-coalesced kubelet/apiserver replies across the
+              # thunderbolt mesh in an ICMP storm.
+              ipv4NativeRoutingCIDR = podNetwork.cidr;
+              ipv6NativeRoutingCIDR = podNetwork.ipv6_cidr;
+              routingMode = "tunnel";
+              tunnelProtocol = "geneve";
+              MTU = 1500;
+
+              # Pin the datapath device set (default auto-detect otherwise wrongly
+              # grabs tailscale0 into the masquerade + device-watch set, where its
+              # peer/DERP churn perturbs pod egress). `enp+` on axon = enp2s0 (WAN
+              # egress/ingress) + enp199s0f5/f6 (thunderbolt fabric, inter-node
+              # geneve); excludes tailscale0. See cluster.settings…cilium.devices.
+              inherit devices;
+
+              # Stable loopback routed by BGP fabric
+              k8sServiceHost = "localhost";
+              k8sServicePort = 6443;
+
+              # Kube-proxy replacement
+              kubeProxyReplacement = true;
+              localRedirectPolicies.enabled = true;
+
+              rollOutCiliumPods = true;
+
+              externalIPs.enabled = true;
+
+              ipv6.enabled = true;
+
+              gatewayAPI = {
+                enabled = false;
+                hostNetwork.enabled = false;
+                secretsNamespace.create = false;
+              };
+
+              envoy = {
+                enabled = false;
+                rollOutPods = true;
+              };
+
+              hubble = {
+                tls = {
+                  auto = {
+                    enabled = true;
+                    method = "cronJob";
+                  };
+                };
+
+                metrics = {
+                  enabled = [
+                    "dns"
+                    "drop"
+                    "tcp"
+                    "flow"
+                    "icmp"
+                    "httpV2"
+                  ];
+                  serviceMonitor.enabled = true;
+                  dashboards = {
+                    enabled = true;
+                    namespace = "monitoring";
+                    annotations.grafana_folder = "Networking";
+                  };
+                };
+              };
+
+              # Agent metrics + the chart's bundled dashboards (picked up by
+              # the grafana sidecar in the monitoring namespace).
+              prometheus = {
+                enabled = true;
+                serviceMonitor = {
+                  enabled = true;
+                  # helm template renders offline; the CRDs are live (kps).
+                  trustCRDsExist = true;
+                };
+              };
+              dashboards = {
+                enabled = true;
+                namespace = "monitoring";
+                annotations.grafana_folder = "Networking";
+              };
+
+              tls.secretsNamespace.create = false;
+              ingressController.secretsNamespace.create = false;
+              envoyConfig.secretsNamespace.create = false;
+
+              operator = {
+                enabled = true;
+                replicas = 1;
+                rollOutPods = true;
+                prometheus.serviceMonitor.enabled = true;
+                dashboards = {
+                  enabled = true;
+                  namespace = "monitoring";
+                  annotations.grafana_folder = "Networking";
+                };
+              };
+
+              # Socket LB + BPF masquerade
+              socketLB.hostNamespaceOnly = true;
+              bpf = {
+                hostLegacyRouting = true;
+                lbExternalClusterIP = true;
+                lbSourceRangeAllTypes = true;
+                masquerade = true;
+                disableExternalIPMitigation = true;
+              };
+
+              # IPAM cluster-pool with pod CIDR from cluster
+              ipam = {
+                mode = "cluster-pool";
+                operator = {
+                  clusterPoolIPv4PodCIDRList = [ podNetwork.cidr ];
+                  clusterPoolIPv4MaskSize = 24;
+                  clusterPoolIPv6PodCIDRList = [ podNetwork.ipv6_cidr ];
+                  clusterPoolIPv6MaskSize = 112;
+                };
+              };
+
+              # BGP control-plane (for FRR peering)
+              bgpControlPlane.enabled = true;
+
+              policyEnforcementMode = "default";
+              policyAuditMode = false;
+            };
+          };
+
+          resources = {
+            ciliumLoadBalancerIPPools."lb-pool" = {
+              metadata.name = "lb-pool";
+              spec.blocks = [ { cidr = loadbalancer-cidr; } ];
+            };
+
+            ciliumClusterwideNetworkPolicies = {
+              # Allow all cilium endpoints egress to each other, except genie-eval's
+              # untrusted eval pods (ai/genie-eval.nix), which get no in-cluster egress.
+              allow-internal-egress.spec = {
+                description = "Policy to allow all Cilium managed endpoint to talk to all other cilium managed endpoints on egress";
+                endpointSelector.matchExpressions = [
+                  {
+                    key = "k8s:io.kubernetes.pod.namespace";
+                    operator = "NotIn";
+                    values = [ "genie-eval" ];
+                  }
+                ];
+                egress = [
+                  { toEndpoints = [ { } ]; }
+                ];
+              };
+
+              # Allow all health checks
+              cilium-health-checks.spec = {
+                endpointSelector.matchLabels."reserved:health" = "";
+                ingress = [
+                  { fromEntities = [ "remote-node" ]; }
+                ];
+                egress = [
+                  { toEntities = [ "remote-node" ]; }
+                ];
+              };
+            };
+          };
+        };
+      };
+  };
+}

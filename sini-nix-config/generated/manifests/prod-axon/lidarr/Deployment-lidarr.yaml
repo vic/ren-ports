@@ -1,0 +1,172 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: lidarr
+    app.kubernetes.io/name: lidarr
+  name: lidarr
+  namespace: media
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: lidarr
+      app.kubernetes.io/name: lidarr
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/configMaps: e4bbe465a6db99a7211a5e6b88f575c4941540e690762cbfa0d5a5f110eccd01
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: lidarr
+        app.kubernetes.io/name: lidarr
+        den.observability/file-tailed: "true"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - args:
+            - lidarr
+            - --log-level
+            - warn
+          env:
+            - name: APIKEY
+              valueFrom:
+                secretKeyRef:
+                  key: lidarr
+                  name: media-arr-api-keys
+            - name: PORT
+              value: "9707"
+            - name: URL
+              value: http://localhost:8686
+          image: ghcr.io/onedr0p/exportarr@sha256:af535d94061cf97a52e1661945ffba78c03f9443eae7c0da1a80a5a4be56b520
+          name: exportarr
+          ports:
+            - containerPort: 9707
+              name: metrics
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /data
+              name: data
+            - mountPath: /config/MediaCover
+              name: metadata
+              subPath: media/metadata/lidarr/MediaCover
+            - mountPath: /scratch
+              name: scratch
+        - args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/config/.alloy
+            - --server.http.listen-addr=127.0.0.1:12345
+          image: docker.io/grafana/alloy@sha256:2aa2099af76c0098d4af7a4d6e48f86cb66dc1a000222ad927a1c67c6542d13f
+          name: logtail
+          securityContext:
+            runAsGroup: 65536
+            runAsUser: 1027
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /data
+              name: data
+            - mountPath: /etc/alloy/config.alloy
+              name: logtail
+              readOnly: true
+              subPath: config.alloy
+            - mountPath: /config/MediaCover
+              name: metadata
+              subPath: media/metadata/lidarr/MediaCover
+            - mountPath: /scratch
+              name: scratch
+        - env:
+            - name: LIDARR__AUTH__APIKEY
+              valueFrom:
+                secretKeyRef:
+                  key: lidarr
+                  name: media-arr-api-keys
+            - name: LIDARR__AUTH__METHOD
+              value: External
+            - name: LIDARR__LOG__ROTATE
+              value: "2"
+            - name: LIDARR__LOG__SIZELIMIT
+              value: "1"
+            - name: LIDARR__POSTGRES__HOST
+              value: media-pg-rw
+            - name: LIDARR__POSTGRES__LOGDB
+              value: lidarr-log
+            - name: LIDARR__POSTGRES__MAINDB
+              value: lidarr-main
+            - name: LIDARR__POSTGRES__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: media-pg-lidarr-password
+            - name: LIDARR__POSTGRES__PORT
+              value: "5432"
+            - name: LIDARR__POSTGRES__USER
+              valueFrom:
+                secretKeyRef:
+                  key: username
+                  name: media-pg-lidarr-password
+            - name: PGID
+              value: "65536"
+            - name: PUID
+              value: "1027"
+            - name: TZ
+              value: America/Los_Angeles
+          image: linuxserver/lidarr@sha256:67887807b13ae025c0fe979da298347c8609969087ab064c81d8e9acc1e06bbf
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /ping
+              port: 8686
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          name: main
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /ping
+              port: 8686
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /data
+              name: data
+            - mountPath: /config/MediaCover
+              name: metadata
+              subPath: media/metadata/lidarr/MediaCover
+            - mountPath: /scratch
+              name: scratch
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      serviceAccountName: lidarr
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: lidarr
+        - name: data
+          persistentVolumeClaim:
+            claimName: media-data-nfs
+        - configMap:
+            name: lidarr
+          name: logtail
+        - name: metadata
+          persistentVolumeClaim:
+            claimName: media-data-nfs
+        - name: scratch
+          persistentVolumeClaim:
+            claimName: media-scratch-nfs

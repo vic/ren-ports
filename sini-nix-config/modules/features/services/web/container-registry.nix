@@ -1,0 +1,106 @@
+# Container registry (docker distribution) on uplink.
+#
+# Serves custom image pushes from workstations and pulls from the k3s
+# fleet. The registry listens on loopback; nginx fronts it on
+# registry.json64.dev with HTTP basic auth (htpasswd) and an unbounded
+# client_max_body_size for large layer uploads. TLS via the wildcard LE
+# cert provisioned by the nginx/acme aspect.
+#
+# Emits the container-registries quirk (domain + username); the cleartext
+# password is a shared-rekeyFile secret consumed by k3s nodes via their
+# own age.secrets entry (see k3s.nix). The htpasswd hash on this host is
+# derived from that same password via a generator dependency.
+{ ren, ... }:
+{
+  ren.aspects.svc-web-container-registry = {
+    includes = with ren.aspects; [ svc-networking-nginx ];
+
+    nixos =
+      {
+        config,
+        environment,
+        ...
+      }:
+      let
+        domain = ren.helpers.domainFor environment "registry";
+      in
+      {
+        services.dockerRegistry = {
+          enable = true;
+          listenAddress = "127.0.0.1";
+          port = 5000;
+          enableDelete = true;
+          enableGarbageCollect = true;
+        };
+
+        services.nginx.virtualHosts."${domain}" = {
+          forceSSL = true;
+          useACMEHost = environment.domain;
+          locations."/" = {
+            proxyPass = "http://127.0.0.1:5000";
+            basicAuthFile = config.age.secrets.registry-htpasswd.path;
+            extraConfig = ''
+              client_max_body_size 0;
+              # Stream large image-layer uploads straight to the registry instead
+              # of buffering the request body to a temp file (nginx's default,
+              # capped at proxy_max_temp_file_size) — multi-hundred-MB layers
+              # otherwise 502. Raise the proxy timeouts so slow large pushes have
+              # room. (DNS for this host bypasses the Cloudflare proxy so CF's
+              # upload cap doesn't also clip pushes.)
+              proxy_request_buffering off;
+              proxy_read_timeout 900s;
+              proxy_send_timeout 900s;
+            '';
+          };
+        };
+      };
+
+    # Cleartext password (shared rekeyFile so k3s nodes decrypt the same
+    # value for their registries.yaml login) + the htpasswd hash derived
+    # from it for the nginx basic-auth file.
+    # The module inside `imports` reads its own class config (generator.dependencies / services.*).
+    age-secrets =
+      { environment, ... }:
+      {
+        imports = [ ({ config, ... }: {
+        age.secrets = {
+          registry-password = {
+            rekeyFile = environment.secretPath + "/registry/registry-password.age";
+            generator.script = "rfc3986-secret";
+          };
+
+          registry-htpasswd = {
+            rekeyFile = environment.secretPath + "/registry/registry-htpasswd.age";
+            generator.dependencies = [ config.age.secrets.registry-password ];
+            generator.script = "htpasswd";
+            settings.username = "builder";
+            owner = config.services.nginx.user;
+            group = config.services.nginx.group;
+          };
+        };
+        }) ];
+      };
+
+    # Publish registry endpoint for k3s nodes to wire into registries.yaml.
+    # Password is resolved on the consumer host via its own shared-rekeyFile
+    # registry-password secret, never carried in the quirk.
+    container-registries =
+      { environment, ... }:
+      {
+        domain = ren.helpers.domainFor environment "registry";
+        username = "builder";
+      };
+    served-domains = { environment, host, ... }: ren.helpers.servedDomains environment host [ "registry" ];
+
+    persist = {
+      directories = [
+        {
+          directory = "/var/lib/docker-registry";
+          user = "docker-registry";
+          group = "docker-registry";
+          mode = "0750";
+        }
+      ];
+    };
+  };
+}

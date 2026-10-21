@@ -1,0 +1,6 @@
+# Generated: the terranix symlink and the provider cache.
+config.tf.json
+.terraform/
+terraform.tfstate.backup
+# Not committed: nixpkgs pins the providers (terranix.nix, unifi.nix).
+.terraform.lock.hcl

@@ -1,0 +1,62 @@
+# Configarr config.yml: ConfigMap mounted as a single file at /app/config/config.yml (see
+# configarr.nix persistence.config). Minimal-but-real starter: quality-definition + TRaSH templates
+# for Sonarr/Radarr; Lidarr/Whisparr are EXPERIMENTAL in configarr (no presets evaluated), so
+# base_url + api_key only. `!env` pulls each key from the env wired from media-arr-api-keys.
+{ ... }:
+{
+  ren.aspects.k8s-media-configarr.k8s-manifests =
+    { ... }:
+    {
+      applications.configarr.helm.releases.configarr.values.configMaps.config.data."config.yml" = ''
+      # Explicit upstream template sources (defaults, pinned for clarity).
+      trashGuideUrl: https://github.com/TRaSH-Guides/Guides
+      recyclarrConfigUrl: https://github.com/recyclarr/config-templates
+
+      sonarr:
+        series:
+          base_url: http://sonarr:8989
+          api_key: !env SONARR_API_KEY
+          # Instance-global file-size boundaries stay on the `series` set (the
+          # TRaSH guidance for mixed regular+anime single instances).
+          quality_definition:
+            type: series
+          include:
+            - template: sonarr-quality-definition-series
+            # WEB-1080p and WEB-2160p lanes — assign per series.
+            - template: sonarr-v4-quality-profile-web-1080p
+            - template: sonarr-v4-custom-formats-web-1080p
+            - template: sonarr-v4-quality-profile-web-2160p
+            - template: sonarr-v4-custom-formats-web-2160p
+            # Anime lane in the same instance (sonarr v4 custom formats are
+            # profile-scoped; series get Series Type: Anime + this profile).
+            - template: sonarr-v4-quality-profile-anime
+            - template: sonarr-v4-custom-formats-anime
+
+      radarr:
+        movies:
+          base_url: http://radarr:7878
+          api_key: !env RADARR_API_KEY
+          quality_definition:
+            type: movie
+          include:
+            - template: radarr-quality-definition-movie
+            # HD Bluray+WEB (default lane) and UHD Bluray+WEB — assign per movie.
+            - template: radarr-quality-profile-hd-bluray-web
+            - template: radarr-custom-formats-hd-bluray-web
+            - template: radarr-quality-profile-uhd-bluray-web
+            - template: radarr-custom-formats-uhd-bluray-web
+
+      # experimental support (configarr Lidarr v2): conservative baseline only.
+      lidarr:
+        main:
+          base_url: http://lidarr:8686
+          api_key: !env LIDARR_API_KEY
+
+      # experimental support (configarr Whisparr v3): conservative baseline only.
+      whisparr:
+        main:
+          base_url: http://whisparr:6969
+          api_key: !env WHISPARR_API_KEY
+      '';
+    };
+}

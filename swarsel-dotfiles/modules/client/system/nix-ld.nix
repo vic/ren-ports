@@ -1,0 +1,121 @@
+{ ren, inputs, ... }:
+let
+  sw = ren.helpers;
+in
+{
+  ren.aspects.nix-ld.nixos =
+    {
+      lib,
+      pkgs,
+      ...
+    }:
+    {
+    config.programs.nix-ld = {
+      enable = true;
+      libraries =
+        with pkgs;
+        [
+          SDL
+          SDL2
+          SDL2_image
+          SDL2_mixer
+          SDL2_ttf
+          SDL_image
+          SDL_mixer
+          SDL_ttf
+          alsa-lib
+          at-spi2-atk
+          at-spi2-core
+          atk
+          bzip2
+          cairo
+          cups
+          curl
+          dbus
+          dbus-glib
+          expat
+          ffmpeg
+          flac
+          fontconfig
+          freeglut
+          freetype
+          fuse3
+          gdk-pixbuf
+          glew_1_10
+          glib
+          pango
+          gtk2
+          gtk3
+          icu
+          libGL
+          libappindicator-gtk3
+          libcaca
+          libcanberra
+          libcap
+          libdrm
+          libelf
+          libgbm
+          libgcrypt
+          libglvnd
+          libidn
+          libjpeg
+          libmikmod
+          libnotify
+          libogg
+          libpng
+          libpng12
+          libpulseaudio
+          librsvg
+          libsamplerate
+          libtheora
+          libtiff
+          libudev0-shim
+          libunwind
+          libusb1
+          libuuid
+          libva
+          libvdpau
+          libvorbis
+          libvpx
+          libxkbcommon
+          libxml2
+          libz
+          mesa
+          nspr
+          nss
+          openssl
+          pango
+          pipewire
+          pixman
+          speex
+          systemd
+          tbb
+          vulkan-loader
+          libice
+          libsm
+          libx11
+          libxscrnsaver
+          libxcomposite
+          libxcursor
+          libxdamage
+          libxext
+          libxfixes
+          libxft
+          libxi
+          libxinerama
+          libxmu
+          libxrandr
+          libxrender
+          libxt
+          libxtst
+          libxxf86vm
+          libxcb
+          libxshmfence
+          zlib
+        ]
+        ++ lib.optionals pkgs.stdenv.hostPlatform.isx86_64 [
+          steam-fhsenv-without-steam
+        ];
+    };
+  };
+}

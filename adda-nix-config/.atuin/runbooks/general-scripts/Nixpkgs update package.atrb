@@ -1,0 +1,206 @@
+id: 019ab6dc-7bb1-7133-8e08-4086aad06375
+name: Nixpkgs update package
+version: 1
+forkedFrom: null
+content:
+- id: f6596d68-4414-48f3-b502-eb54c9a00b17
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 1
+    isToggleable: false
+  content:
+  - type: text
+    text: Nixpkgs update package
+    styles: {}
+  children: []
+- id: 2491ecb7-767f-476e-a642-c1912b1b8e8b
+  type: local-directory
+  props: {}
+  children: []
+- id: df50d5c5-c3ed-4340-af74-8c4334e9d311
+  type: run
+  props:
+    type: bash
+    name: Inspect the state of the repository
+    code: jjui
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: 019b2d2d-fb68-771a-ab63-3538f0548188
+  type: dropdown
+  props:
+    name: branch
+    options: master, staging, release-25.11
+    fixedOptions: master, staging, release-25.11
+    variableOptions: ''
+    commandOptions: ''
+    value: master
+    optionsType: fixed
+    interpreter: bash
+    delimiter: ':'
+  children: []
+- id: f779ef70-eca2-418a-a975-de0fdff4ef20
+  type: script
+  props:
+    interpreter: /run/current-system/sw/bin/fish --interactive
+    outputVariable: ''
+    name: Update to newest branch
+    code: |-
+      jj git fetch --remote upstream --branch {{var.branch}}
+      jj new {{var.branch}}@upstream
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: 22f8b14a-bdb8-498f-b135-72476f1c2eb8
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: Update the package
+    styles: {}
+  children: []
+- id: 4d92adbd-19ed-4656-a927-e7919b7dca5b
+  type: dropdown
+  props:
+    name: package
+    options: atuin-desktop, rimsort, jjui, anytype, protoc-gen-js
+    fixedOptions: atuin-desktop, rimsort, jjui, anytype, protoc-gen-js
+    variableOptions: ''
+    commandOptions: ''
+    value: anytype
+    optionsType: fixed
+    interpreter: bash
+    delimiter: ':'
+  children: []
+- id: f1cf0d03-0b59-46d5-af0d-40065e9a2d0c
+  type: run
+  props:
+    type: bash
+    name: Update the package
+    code: |-
+      (
+      nix-shell maintainers/scripts/update.nix
+        --argstr commit true
+        --argstr skip-prompt true
+        --argstr package {{var.package}}
+      )
+    pty: ece8191a-1a92-4b52-8049-a0ce81f44dba
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: 5d094a85-563d-4678-94dd-d01b2784223a
+  type: run
+  props:
+    type: bash
+    name: Use nix-update directly
+    code: nix-update {{var.package}}
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: 16ae3a44-58fa-4644-836d-b220c039d65c
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: Build the package
+    styles: {}
+  children: []
+- id: 97050af6-086d-42c5-ae47-41b80b61c146
+  type: run
+  props:
+    type: bash
+    name: Build the package
+    code: nix build .#{{var.package}}
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: dd49ed13-3c1c-44ee-b251-19a8558f5995
+  type: run
+  props:
+    type: bash
+    name: Build a proprietary package
+    code: nix build .#{{var.package}} --impure
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 40
+  children: []
+- id: 2df25a8c-313a-49e9-8da4-19da44fc975e
+  type: heading
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+    level: 2
+    isToggleable: false
+  content:
+  - type: text
+    text: Run a package
+    styles: {}
+  children: []
+- id: 20d8ecc2-af66-4c61-873e-3d6a70ffe83f
+  type: run
+  props:
+    type: bash
+    name: Run a package
+    code: nix run .#{{var.package}}
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: 43320997-1d95-41dc-b9ac-365761b7f744
+  type: run
+  props:
+    type: bash
+    name: Terminal 7
+    code: nix run .#{{var.package}} --impure
+    pty: ''
+    global: false
+    outputVisible: true
+    dependency: '{}'
+    terminalRows: 20
+  children: []
+- id: baa08cfb-ed0c-4491-8551-6825bab27168
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []
+- id: 45f269d1-5829-46b9-b33e-9ff8d6009798
+  type: paragraph
+  props:
+    backgroundColor: default
+    textColor: default
+    textAlignment: left
+  content: []
+  children: []

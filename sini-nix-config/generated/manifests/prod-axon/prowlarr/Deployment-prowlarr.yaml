@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: prowlarr
+    app.kubernetes.io/name: prowlarr
+  name: prowlarr
+  namespace: media
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: prowlarr
+      app.kubernetes.io/name: prowlarr
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/configMaps: 5bb3fb5fa576c7fab5da29130d713cb972c1786f8c79f373ba69c63536a6d8fb
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: prowlarr
+        app.kubernetes.io/name: prowlarr
+        den.observability/file-tailed: "true"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - args:
+            - prowlarr
+            - --log-level
+            - warn
+          env:
+            - name: APIKEY
+              valueFrom:
+                secretKeyRef:
+                  key: prowlarr
+                  name: media-arr-api-keys
+            - name: PORT
+              value: "9707"
+            - name: URL
+              value: http://localhost:9696
+          image: ghcr.io/onedr0p/exportarr@sha256:af535d94061cf97a52e1661945ffba78c03f9443eae7c0da1a80a5a4be56b520
+          name: exportarr
+          ports:
+            - containerPort: 9707
+              name: metrics
+          volumeMounts:
+            - mountPath: /config
+              name: config
+        - args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/config/.alloy
+            - --server.http.listen-addr=127.0.0.1:12345
+          image: docker.io/grafana/alloy@sha256:2aa2099af76c0098d4af7a4d6e48f86cb66dc1a000222ad927a1c67c6542d13f
+          name: logtail
+          securityContext:
+            runAsGroup: 65536
+            runAsUser: 1027
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /etc/alloy/config.alloy
+              name: logtail
+              readOnly: true
+              subPath: config.alloy
+        - env:
+            - name: PGID
+              value: "65536"
+            - name: PROWLARR__AUTH__APIKEY
+              valueFrom:
+                secretKeyRef:
+                  key: prowlarr
+                  name: media-arr-api-keys
+            - name: PROWLARR__AUTH__METHOD
+              value: External
+            - name: PROWLARR__LOG__ROTATE
+              value: "2"
+            - name: PROWLARR__LOG__SIZELIMIT
+              value: "1"
+            - name: PROWLARR__POSTGRES__HOST
+              value: media-pg-rw
+            - name: PROWLARR__POSTGRES__LOGDB
+              value: prowlarr-log
+            - name: PROWLARR__POSTGRES__MAINDB
+              value: prowlarr-main
+            - name: PROWLARR__POSTGRES__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: media-pg-prowlarr-password
+            - name: PROWLARR__POSTGRES__PORT
+              value: "5432"
+            - name: PROWLARR__POSTGRES__USER
+              valueFrom:
+                secretKeyRef:
+                  key: username
+                  name: media-pg-prowlarr-password
+            - name: PUID
+              value: "1027"
+            - name: TZ
+              value: America/Los_Angeles
+          image: linuxserver/prowlarr@sha256:5944ab837fccdcfe5a18f271d095ba24c037fa1cef085b5ee66daeae792cc9f4
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /ping
+              port: 9696
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          name: main
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /ping
+              port: 9696
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          volumeMounts:
+            - mountPath: /config
+              name: config
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      serviceAccountName: prowlarr
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: prowlarr
+        - configMap:
+            name: prowlarr
+          name: logtail

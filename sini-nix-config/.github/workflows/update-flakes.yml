@@ -1,0 +1,35 @@
+name: "Update flakes"
+on:
+  repository_dispatch:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+jobs:
+  createPullRequest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - name: Update helm charts
+        run: nix run github:nix-community/nixhelm#helmupdater -- update-all --commit
+      - name: Update custom packages
+        # Bumps github-sourced pkgs/by-name packages via nix-update; edits stay
+        # in the working tree and are folded into the PR by update-flake-lock.
+        # Pinned packages (e.g. cni-plugin-cilium on a pre-release) are skipped.
+        # --no-build keeps the nightly fast and avoids OOM/timeout on heavy
+        # packages; the opened PR's own checks build and validate the bumps
+        # (a vendored package may need a follow-up `update-pkgs <pkg>` locally
+        # to refresh its vendor/cargo hash).
+        run: nix run .#update-pkgs -- --no-build
+      - name: Update flake.lock
+        uses: DeterminateSystems/update-flake-lock@v28
+        with:
+          pr-labels: |
+            merge-queue

@@ -1,0 +1,183 @@
+{ ren, lib, ... }:
+let
+  serviceDomains = [ "headscale" ];
+  # DERP's STUN listener and tailscaled's WireGuard port.
+  udpPorts = [
+    3478
+    41641
+  ];
+  portList = lib.concatMapStringsSep "," toString udpPorts;
+in
+{
+  ren.aspects.svc-networking-headscale = {
+    includes = with ren.aspects; [ svc-networking-nginx ];
+
+    nixos =
+      {
+        config,
+        exit-nodes,
+        environment,
+        host,
+        pkgs,
+        ...
+      }:
+      let
+        domain = ren.helpers.domainFor environment "headscale";
+        kanidmDomain = ren.helpers.domainFor environment "kanidm";
+      in
+      {
+        services = {
+          headscale = {
+            enable = true;
+            address = "0.0.0.0";
+            port = 8085;
+
+            settings = {
+              server_url = "https://${domain}";
+              logtail = {
+                enabled = false;
+              };
+              prefixes = {
+                v4 = "100.72.0.0/16";
+                v6 = "fd7a:115c:a1e0::/48";
+                allocation = "random";
+              };
+              derp = {
+                server = {
+                  enabled = true;
+                  region_id = 999;
+                  region_code = config.networking.hostName;
+                  region_name = config.networking.hostName + " DERP";
+                  stun_listen_addr = "0.0.0.0:3478";
+                  auto_update_enabled = true;
+                  automatically_add_embedded_derp_region = true;
+                };
+              };
+
+              metrics_listen_addr = "127.0.0.1:8090";
+
+              dns = {
+                magic_dns = true;
+                base_domain = "ts.${environment.domain}";
+                override_local_dns = true;
+                nameservers.global = [
+                  "1.1.1.1"
+                  "1.0.0.1"
+                  "2606:4700:4700::1111"
+                  "2606:4700:4700::1001"
+                ];
+              };
+
+              oidc = {
+                only_start_if_oidc_is_available = true;
+                issuer = "https://${kanidmDomain}/oauth2/openid/headscale";
+                client_id = "headscale";
+                client_secret_path = config.age.secrets.headscale-oidc-secret.path;
+                scope = [
+                  "openid"
+                  "profile"
+                  "email"
+                ];
+                pkce = {
+                  enabled = true;
+                  method = "S256";
+                };
+              };
+
+              policy.path = pkgs.writeText "policy.json" (
+                builtins.toJSON {
+                  acls = [
+                    {
+                      action = "accept";
+                      src = [ "*" ];
+                      dst = [ "*:*" ];
+                    }
+                  ];
+                  # Each host joins as its own user (tailscale/secrets.nix).
+                  autoApprovers.exitNode = map (n: "${n.hostname}@") exit-nodes;
+                }
+              );
+            };
+          };
+
+          nginx.virtualHosts."${domain}" = {
+            forceSSL = true;
+            useACMEHost = environment.domain;
+            locations = {
+              "/" = {
+                proxyPass = "http://localhost:${toString config.services.headscale.port}";
+                proxyWebsockets = true;
+              };
+              "/metrics" = {
+                proxyPass = "http://${config.services.headscale.settings.metrics_listen_addr}/metrics";
+              };
+            };
+          };
+        };
+
+        # only_start_if_oidc_is_available: when kanidm runs here and a switch
+        # restarts both, start only once kanidm reports ready (Type=notify).
+        systemd.services.headscale.after = lib.optional config.services.kanidm.server.enable "kanidm.service";
+
+        environment.systemPackages = [
+          config.services.headscale.package
+        ];
+      };
+
+    age-secrets =
+      { environment, host, ... }:
+      {
+        age.secrets.headscale-oidc-secret = {
+          rekeyFile = environment.secretPath + "/oidc/headscale-oidc-client-secret.age";
+          generator = {
+            tags = [ "oidc" ];
+            script = "rfc3986-secret";
+          };
+          mode = "440";
+          owner = "headscale";
+          group = "headscale";
+        };
+      };
+
+    firewall = {
+      networking.firewall.allowedUDPPorts = udpPorts;
+    };
+
+    port-forwards =
+      { environment, host, ... }:
+      {
+        environment = environment.name;
+        name = "headscale-to-${host.name}";
+        protocol = "udp";
+        wanPort = portList;
+        forward = {
+          ip = ren.helpers.addressOn environment "default" host;
+          port = portList;
+        };
+        allWans = true;
+      };
+
+    service-domains = serviceDomains;
+    served-domains = { environment, host, ... }: ren.helpers.servedDomains environment host serviceDomains;
+
+    persist = {
+      directories = [
+        "/var/lib/headscale"
+      ];
+    };
+
+    prometheus-targets =
+      { environment, host, ... }:
+      {
+        hostname = host.name;
+        ip = builtins.head (ren.helpers.ipv4Of host);
+        inherit environment;
+        exporters = [
+          {
+            job = "headscale";
+            port = 8090;
+          }
+        ];
+      };
+  };
+}

@@ -1,0 +1,36 @@
+diff --git a/src/actors.rs b/src/actors.rs
+index 755fa62..de30cf4 100644
+--- a/src/actors.rs
++++ b/src/actors.rs
+@@ -57,6 +57,7 @@ pub async fn spawn(config: &Config, db: &Surreal<Db>) -> Result<(), Whatever> {
+         LlamaArgs {
+             client: reqwest_client.clone(),
+             api_url: (*config.ml_extraction.url).clone(),
++            enabled: config.ml_extraction.enabled,
+         },
+     )
+     .instrument(info_span!("spawn::extraction"))
+diff --git a/src/processing/llama_actor.rs b/src/processing/llama_actor.rs
+index 8eb18d9..fb6aa76 100644
+--- a/src/processing/llama_actor.rs
++++ b/src/processing/llama_actor.rs
+@@ -81,6 +81,8 @@ pub struct LlamaActor;
+ pub struct LlamaArgs {
+     pub client: Client,
+     pub api_url: String,
++    /// Without extraction nothing talks to the server, so do not wait for it.
++    pub enabled: bool,
+ }
+ 
+ pub struct LlamaState {
+@@ -148,7 +150,9 @@ impl Actor for LlamaActor {
+         _: ActorRef<Self::Msg>,
+         args: Self::Arguments,
+     ) -> Result<Self::State, ActorProcessingErr> {
+-        wait_until_healthy(&args.client, &args.api_url).await?;
++        if args.enabled {
++            wait_until_healthy(&args.client, &args.api_url).await?;
++        }
+ 
+         let prompts = stream::iter(TASKS)
+             .then(async |task| {

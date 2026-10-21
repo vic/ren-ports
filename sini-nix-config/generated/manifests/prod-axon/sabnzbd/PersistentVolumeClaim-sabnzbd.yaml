@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/instance: sabnzbd
+    app.kubernetes.io/name: sabnzbd
+    recurring-job-group.longhorn.io/media-config: enabled
+  name: sabnzbd
+  namespace: media
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: longhorn

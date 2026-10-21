@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: element-web
+    app.kubernetes.io/name: element-web
+  name: element-web
+  namespace: matrix
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: element-web
+      app.kubernetes.io/name: element-web
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/config: accfd537370b53915d830391c6ba64f237ae26462fb89239fb1f0ff7672f9dbb
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: element-web
+        app.kubernetes.io/name: element-web
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - env:
+            - name: ELEMENT_WEB_PORT
+              value: "8080"
+          image: ghcr.io/element-hq/element-web@sha256:041550f9000bf31ab96a622e35c47d604a0e7c343da4e3c8f69f00638cd5adbe
+          livenessProbe:
+            httpGet:
+              path: /version
+              port: 8080
+          name: main
+          readinessProbe:
+            httpGet:
+              path: /version
+              port: 8080
+          volumeMounts:
+            - mountPath: /app/config.json
+              name: config
+              readOnly: true
+              subPath: config.json
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      securityContext:
+        runAsGroup: 101
+        runAsNonRoot: true
+        runAsUser: 101
+      serviceAccountName: element-web
+      volumes:
+        - configMap:
+            name: element-web-config
+          name: config

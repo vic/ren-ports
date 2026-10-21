@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd-repo-server
+  namespace: argocd
+spec:
+  endpoints:
+    - port: http-metrics
+      relabelings:
+        - action: replace
+          replacement: argocd-repo-server
+          targetLabel: job
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-repo-server-metrics

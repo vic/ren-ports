@@ -1,0 +1,202 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: sabnzbd
+    app.kubernetes.io/name: sabnzbd
+  name: sabnzbd
+  namespace: media
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: sabnzbd
+      app.kubernetes.io/name: sabnzbd
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/configMaps: a96eef1f072fc8edeb3738e670cfa83c3a7a70d545d1c0cf27990c4a47be2d0b
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: sabnzbd
+        app.kubernetes.io/name: sabnzbd
+        den.observability/file-tailed: "true"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - args:
+            - sabnzbd
+            - --log-level
+            - warn
+          env:
+            - name: APIKEY
+              valueFrom:
+                secretKeyRef:
+                  key: sabnzbd
+                  name: media-arr-api-keys
+            - name: PORT
+              value: "9707"
+            - name: URL
+              value: http://localhost:8080
+          image: ghcr.io/onedr0p/exportarr@sha256:af535d94061cf97a52e1661945ffba78c03f9443eae7c0da1a80a5a4be56b520
+          name: exportarr
+          ports:
+            - containerPort: 9707
+              name: metrics
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /scratch
+              name: scratch
+        - args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/config/.alloy
+            - --server.http.listen-addr=127.0.0.1:12345
+          image: docker.io/grafana/alloy@sha256:2aa2099af76c0098d4af7a4d6e48f86cb66dc1a000222ad927a1c67c6542d13f
+          name: logtail
+          securityContext:
+            runAsGroup: 65536
+            runAsUser: 1027
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /etc/alloy/config.alloy
+              name: logtail
+              readOnly: true
+              subPath: config.alloy
+            - mountPath: /scratch
+              name: scratch
+        - env:
+            - name: PGID
+              value: "65536"
+            - name: PUID
+              value: "1027"
+            - name: TZ
+              value: America/Los_Angeles
+          image: linuxserver/sabnzbd@sha256:7a13af91cf296399e302d2fb6fc709d6e2ea15e3094f220684611fbe1dd43625
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          name: main
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /scratch
+              name: scratch
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      initContainers:
+        - command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              INI=/config/sabnzbd.ini
+              WHITELIST="nzb.json64.dev, sabnzbd"
+              # Bound /config/logs: SAB rotates sabnzbd.log at max_log_size bytes,
+              # keeping log_backups files. 1 MiB * 2 backups keeps the dir small; the
+              # file-tail sidecar ships entries before they roll off.
+              LOG_SIZE="1048576"
+              LOG_BACKUPS="2"
+              mkdir -p /scratch/usenet/incomplete /scratch/usenet/complete
+              # ensure_key <section-header-regex> <key> <full-line>: set <key> under
+              # the given section (creating the section if absent). The section must be
+              # the LAST one for the simple `/<section>/a` append to land inside it; we
+              # only use it for [logging] which we append at end-of-file below.
+              ensure_logging_key() {
+                key="$1"; line="$2"
+                grep -q '^\[logging\]' "$INI" || printf '\n[logging]\n' >> "$INI"
+                if grep -q "^$key = " "$INI"; then
+                  sed -i "s|^$key = .*|$line|" "$INI"
+                else
+                  sed -i "/^\[logging\]/a $line" "$INI"
+                fi
+              }
+              if [ ! -f "$INI" ]; then
+                echo "seeding fresh $INI"
+                {
+                  printf '%s\n' '[misc]'
+                  printf '%s\n' 'host = 0.0.0.0'
+                  printf '%s\n' 'port = 8080'
+                  printf '%s\n' "api_key = $API_KEY"
+                  printf '%s\n' "host_whitelist = $WHITELIST"
+                  printf '%s\n' 'inet_exposure = 4'
+                  printf '%s\n' 'download_dir = /scratch/usenet/incomplete'
+                  printf '%s\n' 'complete_dir = /scratch/usenet/complete'
+                  printf '%s\n' '[logging]'
+                  printf '%s\n' "max_log_size = $LOG_SIZE"
+                  printf '%s\n' "log_backups = $LOG_BACKUPS"
+                } > "$INI"
+              else
+                echo "reconciling existing $INI"
+                # sed "/^\[misc\]/a ..." silently no-ops if [misc] is absent (set -e can't
+                # catch it), so ensure the section exists before any append below.
+                grep -q '^\[misc\]' "$INI" || printf '[misc]\n' >> "$INI"
+                if grep -q '^api_key = ' "$INI"; then
+                  sed -i "s|^api_key = .*|api_key = $API_KEY|" "$INI"
+                else
+                  sed -i "/^\[misc\]/a api_key = $API_KEY" "$INI"
+                fi
+                if grep -q '^host_whitelist = ' "$INI"; then
+                  sed -i "s|^host_whitelist = .*|host_whitelist = $WHITELIST|" "$INI"
+                else
+                  sed -i "/^\[misc\]/a host_whitelist = $WHITELIST" "$INI"
+                fi
+                # inet_exposure 4 = WebUI reachable from non-local clients (the gateway's
+                # pod network); without it SAB answers "External internet access denied".
+                if grep -q '^inet_exposure = ' "$INI"; then
+                  sed -i "s|^inet_exposure = .*|inet_exposure = 4|" "$INI"
+                else
+                  sed -i "/^\[misc\]/a inet_exposure = 4" "$INI"
+                fi
+                ensure_logging_key 'max_log_size' "max_log_size = $LOG_SIZE"
+                ensure_logging_key 'log_backups' "log_backups = $LOG_BACKUPS"
+              fi
+          env:
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: sabnzbd
+                  name: media-arr-api-keys
+          image: linuxserver/sabnzbd@sha256:7a13af91cf296399e302d2fb6fc709d6e2ea15e3094f220684611fbe1dd43625
+          name: config-seed
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /scratch
+              name: scratch
+      serviceAccountName: sabnzbd
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: sabnzbd
+        - configMap:
+            name: sabnzbd
+          name: logtail
+        - name: scratch
+          persistentVolumeClaim:
+            claimName: media-scratch-local

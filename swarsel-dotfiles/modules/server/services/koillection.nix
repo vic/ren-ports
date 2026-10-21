@@ -1,0 +1,196 @@
+{ ren, inputs, ... }:
+let
+  sw = ren.helpers;
+in
+{
+  ren.aspects.koillection = sw.distributed (
+    {
+      globals-defs,
+      host,
+      config,
+      lib,
+      ...
+    }:
+    let
+      globals = sw.globalsOf globals-defs;
+      confLib = sw.confLibOf { inherit host globals config; };
+      inherit
+        (confLib.gen {
+          dir = "/var/lib/koillection";
+          name = "koillection";
+          port = 2282;
+        })
+        proxyAddress4
+        proxyAddress6
+        serviceAddress
+        serviceDir
+        serviceDomain
+        serviceName
+        servicePort
+        serviceUser
+        topologyContainerName
+        ;
+      inherit (confLib.static)
+        homeServiceAddress
+        homeWebProxy
+        isHome
+        nginxAccessRules
+        webProxy
+        ;
+      serviceDB = "koillection";
+
+      postgresUser = config.systemd.services.postgresql.serviceConfig.User; # postgres
+      postgresPort = config.services.postgresql.settings.port; # 5432
+      containerRev = "sha256:bb8ad2b6891441d8ec5c3169b684b71574f3bb3e9afb345bad2f91d833d60340";
+
+      inherit (config.swarselsystems) sopsFile;
+    in
+    {
+      imports = [
+      ];
+      config = {
+        swarselsystems.enabledServerModules = [ "koillection" ];
+        topology.nodes.${topologyContainerName}.services.${serviceName} = {
+          icon = sw.root "files/topology-images/${serviceName}.png";
+          info = "https://${serviceDomain}";
+          name = sw.toCapitalized serviceName;
+        };
+        globals = {
+          services = confLib.mkServiceGlobal {
+            inherit
+              homeServiceAddress
+              isHome
+              proxyAddress4
+              proxyAddress6
+              serviceAddress
+              serviceDomain
+              serviceName
+              ;
+          };
+          dns = confLib.mkDnsRecord { inherit proxyAddress4 proxyAddress6 serviceName; };
+          monitoring.http = confLib.mkHttpMonitoring {
+            inherit serviceName servicePort;
+            expectedBodyRegex = "Koillection";
+          };
+          networks = confLib.mkDualFirewallRules {
+            tcpPorts = [
+              servicePort
+              postgresPort
+            ];
+          };
+        };
+        sops.secrets = {
+          koillection-db-password = {
+            inherit sopsFile;
+            group = postgresUser;
+            mode = "0440";
+            owner = postgresUser;
+          };
+          koillection-env-file = { inherit sopsFile; };
+        };
+        services.postgresql = {
+          enable = true;
+          authentication = ''
+            host ${serviceDB} ${serviceDB} 10.88.0.0/16 scram-sha-256
+          '';
+          enableTCPIP = true;
+          ensureDatabases = [ serviceDB ];
+          ensureUsers = [
+            {
+              ensureDBOwnership = true;
+              name = serviceDB;
+            }
+          ];
+        };
+        environment.persistence."/state" = lib.mkIf config.swarselsystems.isMicroVM {
+          directories = [ { directory = "/var/lib/${serviceName}"; } ];
+        };
+        virtualisation.oci-containers.containers.koillection = {
+          environment = {
+            APP_DEBUG = "0";
+            APP_ENV = "prod";
+            CORS_ALLOW_ORIGIN = "https?://(localhost|swag\\.swarsel\\.win)(:[0-9]+)?$";
+            DB_DRIVER = "pdo_pgsql";
+            DB_HOST = "host.docker.internal";
+            DB_NAME = serviceDB;
+            # DB_PASSWORD set in koillection-env-file
+            DB_PORT = "${toString postgresPort}";
+            DB_USER = serviceUser;
+            DB_VERSION = "16";
+            HTTPS_ENABLED = "1";
+            PHP_MEMORY_LIMIT = "512M";
+            PHP_TZ = config.repo.secrets.common.location.timezone;
+            UPLOAD_MAX_FILESIZE = "512M";
+          };
+          environmentFiles = [
+            config.sops.secrets.koillection-env-file.path
+          ];
+          extraOptions = [
+            "--add-host=host.docker.internal:host-gateway" # podman
+          ];
+          image = "koillection/koillection@${containerRev}";
+          ports = [
+            "${toString servicePort}:80"
+          ];
+          volumes = [
+            "${serviceDir}/uploads:/uploads"
+          ];
+        };
+        # networking.firewall.allowedTCPPorts = [ servicePort postgresPort ];
+        systemd.services.postgresql.postStart =
+          let
+            passwordPath = config.sops.secrets.koillection-db-password.path;
+          in
+          ''
+            ${config.services.postgresql.package}/bin/psql -tA <<'EOF'
+              DO $$
+              DECLARE password TEXT;
+              BEGIN
+                password := trim(both from replace(pg_read_file('${passwordPath}'), E'\n', '''));
+                EXECUTE format('ALTER ROLE ${serviceDB} WITH PASSWORD '''%s''';', password);
+              END $$;
+            EOF
+          '';
+        nodes =
+          let
+            extraConfigLoc = ''
+              proxy_buffer_size          128k;
+              proxy_buffers              4 256k;
+              proxy_busy_buffers_size    256k;
+            '';
+          in
+          lib.mkMerge [
+            {
+              ${webProxy}.services.nginx = confLib.genNginx {
+                inherit
+                  extraConfigLoc
+                  serviceAddress
+                  serviceDomain
+                  serviceName
+                  servicePort
+                  ;
+                maxBody = 0;
+              };
+            }
+            {
+              ${homeWebProxy}.services.nginx = lib.mkIf isHome (
+                confLib.genNginx {
+                  inherit
+                    extraConfigLoc
+                    serviceDomain
+                    serviceName
+                    servicePort
+                    ;
+                  extraConfig = nginxAccessRules;
+                  maxBody = 0;
+                  serviceAddress = homeServiceAddress;
+                }
+              );
+            }
+          ];
+
+      };
+    }
+
+  ) // { includes = [ ren.aspects.podman ren.aspects.postgresql ]; };
+}

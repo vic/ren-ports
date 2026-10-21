@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: unpackerr
+    app.kubernetes.io/name: unpackerr
+  name: unpackerr
+  namespace: media
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: unpackerr
+      app.kubernetes.io/name: unpackerr
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: unpackerr
+        app.kubernetes.io/name: unpackerr
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - env:
+            - name: PGID
+              value: "65536"
+            - name: PUID
+              value: "1027"
+            - name: TZ
+              value: America/Los_Angeles
+            - name: UN_LIDARR_0_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: lidarr
+                  name: media-arr-api-keys
+            - name: UN_LIDARR_0_PATHS_0
+              value: /scratch/torrents/complete
+            - name: UN_LIDARR_0_URL
+              value: http://lidarr:8686
+            - name: UN_LOG_QUEUES
+              value: 1m
+            - name: UN_RADARR_0_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: radarr
+                  name: media-arr-api-keys
+            - name: UN_RADARR_0_PATHS_0
+              value: /scratch/torrents/complete
+            - name: UN_RADARR_0_URL
+              value: http://radarr:7878
+            - name: UN_SONARR_0_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: sonarr
+                  name: media-arr-api-keys
+            - name: UN_SONARR_0_PATHS_0
+              value: /scratch/torrents/complete
+            - name: UN_SONARR_0_URL
+              value: http://sonarr:8989
+            - name: UN_WEBSERVER_LISTEN_ADDR
+              value: 0.0.0.0:5656
+            - name: UN_WEBSERVER_METRICS
+              value: "true"
+            - name: UN_WHISPARR_0_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: whisparr
+                  name: media-arr-api-keys
+            - name: UN_WHISPARR_0_PATHS_0
+              value: /scratch/torrents/complete
+            - name: UN_WHISPARR_0_URL
+              value: http://whisparr:6969
+          image: golift/unpackerr@sha256:244fc45cb207308f60e8f52dd703c2b3463385752de0f9517c58ff9d331ed15e
+          name: main
+          ports:
+            - containerPort: 5656
+              name: metrics
+          volumeMounts:
+            - mountPath: /scratch
+              name: scratch
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      serviceAccountName: unpackerr
+      volumes:
+        - name: scratch
+          persistentVolumeClaim:
+            claimName: media-scratch-local

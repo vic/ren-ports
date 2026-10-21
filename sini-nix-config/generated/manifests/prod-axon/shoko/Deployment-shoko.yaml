@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/controller: main
+    app.kubernetes.io/instance: shoko
+    app.kubernetes.io/name: shoko
+  name: shoko
+  namespace: media
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/controller: main
+      app.kubernetes.io/instance: shoko
+      app.kubernetes.io/name: shoko
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/configMaps: 5e09d21c7fba56e932ed2ae2c870f6e263e6c628210f30c55c3d8ce21ec811b3
+      labels:
+        app.kubernetes.io/controller: main
+        app.kubernetes.io/instance: shoko
+        app.kubernetes.io/name: shoko
+        den.observability/file-tailed: "true"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/home/shoko/.shoko/.alloy
+            - --server.http.listen-addr=127.0.0.1:12345
+          image: docker.io/grafana/alloy@sha256:2aa2099af76c0098d4af7a4d6e48f86cb66dc1a000222ad927a1c67c6542d13f
+          name: logtail
+          securityContext:
+            runAsGroup: 65536
+            runAsUser: 1027
+          volumeMounts:
+            - mountPath: /home/shoko/.shoko
+              name: config
+            - mountPath: /data
+              name: data
+            - mountPath: /etc/alloy/config.alloy
+              name: logtail
+              readOnly: true
+              subPath: config.alloy
+        - env:
+            - name: PGID
+              value: "65536"
+            - name: PUID
+              value: "1027"
+            - name: TZ
+              value: America/Los_Angeles
+          image: shokoanime/server@sha256:b841f8249c9edfba102e4072e2b2a3eae4179e5dd553f29e11b9898a44f1e836
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /api/v3/Init/Status
+              port: 8111
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          name: main
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /api/v3/Init/Status
+              port: 8111
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+          volumeMounts:
+            - mountPath: /home/shoko/.shoko
+              name: config
+            - mountPath: /data
+              name: data
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      initContainers:
+        - command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              dst=/home/shoko/.shoko/Shoko.CLI/plugins
+              marker="$dst/LuaRenamer/.installed-v5.10.3-stable-5.3.1"
+              if [ -f "$marker" ]; then
+                echo "LuaRenamer v5.10.3-stable-5.3.1 already present; skipping."
+                exit 0
+              fi
+              echo "Installing LuaRenamer v5.10.3-stable-5.3.1..."
+              apk add --no-cache curl unzip
+              mkdir -p "$dst"
+              rm -rf "$dst/LuaRenamer"
+              curl -fL "https://github.com/Mik1ll/LuaRenamer/releases/download/v5.10.3-stable-5.3.1/LuaRenamer_v5.10.3-stable-5.3.1-0-g4f8f6bb_linux-x64.zip" -o /tmp/lr.zip
+              unzip -o /tmp/lr.zip -d "$dst"
+              chown -R 1027:65536 "$dst/LuaRenamer"
+              touch "$marker"
+              echo "LuaRenamer v5.10.3-stable-5.3.1 installed."
+          image: library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+          name: install-luarenamer
+          volumeMounts:
+            - mountPath: /home/shoko/.shoko
+              name: config
+            - mountPath: /data
+              name: data
+      serviceAccountName: shoko
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: shoko
+        - name: data
+          persistentVolumeClaim:
+            claimName: media-data-nfs
+        - configMap:
+            name: shoko
+          name: logtail

@@ -1,0 +1,258 @@
+{
+  writeShellApplication,
+  jq,
+  curl,
+  coreutils,
+  findutils,
+  gnugrep,
+  gawk,
+  bash,
+  endpoint ? "http://10.11.0.20:8888",
+  # A file holding the bank's token, sent as `Authorization: Bearer` on every bank
+  # call (den-law gates reads and writes). null sends none.
+  tokenFile ? null,
+  bank ? "den-law",
+}:
+# Publish past Claude Code sessions to the hindsight bank as `tier:episode`.
+#
+# The SessionEnd hook captures sessions from now on; this captures the ones that
+# already happened. It deliberately does NOT re-implement the write — it invokes
+# the same `hindsight-archive.sh` the hook does, so the corpus is assembled by one
+# renderer and one retain path. Two renderers would give two corpora.
+#
+# RESUMABLE WITHOUT LOCAL STATE. The bank is the source of truth: `document_id` is
+# the session id, so the set of finished sessions is a query, not a file. A run that
+# is interrupted, a host that is rebuilt, and a second host publishing at the same
+# time all behave correctly, because nothing depends on a cursor anyone has to keep.
+# The cost is one list call per run.
+#
+# WHY IT RUNS PER HOST. Transcripts live under the user's own ~/.claude/projects, so
+# sibling hosts publish their own; the aspect ships this to each. Session ids are
+# uuids, so two hosts cannot collide, and `--projects-dir` covers the other shape —
+# a directory copied over from a host that cannot reach the endpoint.
+writeShellApplication {
+  name = "hindsight-backfill";
+  meta.description = "Publish past Claude Code sessions to a hindsight bank as tier:episode";
+  runtimeInputs = [
+    jq
+    curl
+    coreutils
+    findutils
+    gnugrep
+    gawk
+    bash
+  ];
+  text = ''
+    set -uo pipefail
+
+    base="''${HINDSIGHT_ENDPOINT:-${endpoint}}"
+    bank="''${HINDSIGHT_BANK:-${bank}}"
+    tokfile="''${HINDSIGHT_TOKEN_FILE:-${if tokenFile == null then "" else tokenFile}}"
+    auth=()
+    if [ -n "$tokfile" ]; then
+      tok=$(cat "$tokfile") || { echo "hindsight-backfill: cannot read token file $tokfile" >&2; exit 1; }
+      auth=(-H "Authorization: Bearer $tok")
+    fi
+    archiver="''${HINDSIGHT_ARCHIVER:-$HOME/.claude/hindsight-archive.sh}"
+    projects="$HOME/.claude/projects"
+    strategy="''${HINDSIGHT_STRATEGY:-episode}"
+    renderer="''${HINDSIGHT_RENDERER:-$HOME/.claude/hindsight-episode.jq}"
+    dry=0
+    force=0
+    limit=0
+    sleep_between=0
+    min_age=0
+
+    usage() {
+      cat <<'USAGE'
+    hindsight-backfill [options]
+
+      --projects-dir DIR   where session transcripts live (default ~/.claude/projects)
+      --limit N            publish at most N sessions this run
+      --sleep S            seconds to wait between sessions
+      --min-age M          skip transcripts modified in the last M minutes
+      --force              republish sessions the bank already holds
+      --dry-run            list what would be published, write nothing
+      -h, --help           this
+
+    Resumable: sessions already in the bank are skipped, so re-running after an
+    interrupt continues where it stopped. Nothing is kept on disk to go stale.
+    USAGE
+    }
+
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --projects-dir) projects="$2"; shift 2 ;;
+        --limit) limit="$2"; shift 2 ;;
+        --sleep) sleep_between="$2"; shift 2 ;;
+        --min-age) min_age="$2"; shift 2 ;;
+        --force) force=1; shift ;;
+        --dry-run) dry=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+      esac
+    done
+
+    doclist=$(mktemp); doctsv=$(mktemp); rendered=$(mktemp)
+    trap 'rm -f "$doclist" "$doctsv" "$rendered"' EXIT
+
+    [ -d "$projects" ] || { echo "no such projects dir: $projects" >&2; exit 1; }
+    [ -x "$archiver" ] || [ -r "$archiver" ] || {
+      echo "archiver not found: $archiver" >&2; exit 1; }
+
+    # ★ REFUSE AN ARCHIVER THAT CANNOT DO SYNC. Measured 2026-09-01: run against an
+    # older deployed archiver, every retain went out ASYNC, all 90 sessions hit the
+    # queue in 10 seconds, and the fact-count check then read 0 for each because
+    # extraction had not started — so the tool reported "empty 90" while actually
+    # having launched the whole backfill uncontrolled. It looked like a total
+    # failure and was the opposite.
+    #
+    # The reason to hold the line is NOT scarce inference — llama-cpp runs
+    # `replicas = 3`, one per GPU node, so retains spread across three workers.
+    # It is that an async submit gives up all CONTROL: no progress, nothing to
+    # interrupt, and a fact count read before extraction starts that reports every
+    # session empty. The measured ceiling sits elsewhere anyway — a backfill on
+    # 2026-08-31 pushed recall past 20s and the DATAPLANE then refused connections
+    # for 135s, which three GPUs did not prevent.
+    grep -q 'HINDSIGHT_ARCHIVE_SYNC' "$archiver" || {
+      echo "archiver at $archiver has no sync mode — it would submit every session" >&2
+      echo "asynchronously at once. Deploy the current hindsight aspect first." >&2
+      exit 1; }
+
+    # Fail LOUD, unlike the hook. A hook that cannot reach the bank must not break a
+    # session close; a backfill that cannot reach it has nothing to do and should say
+    # so, rather than walk 90 sessions reporting each one skipped.
+    curl -sS -m 5 -o /dev/null "$base/health" || {
+      echo "hindsight unreachable at $base" >&2; exit 1; }
+
+    # Resumability, in one call: the ids the bank already holds, WITH their chunk
+    # counts. The id alone is not enough — see the completeness check below.
+    curl "''${auth[@]}" -sS -m 60 "$base/v1/default/banks/$bank/documents?limit=100000" \
+      -o "$doclist" || { echo "could not list documents from $base/$bank" >&2; exit 1; }
+    jq -r '(.items // [])[] | "\(.id)\t\(.memory_unit_count // 0)"' "$doclist" \
+      | sort -u > "$doctsv"
+    echo "bank holds $(wc -l < "$doctsv") document(s)"
+
+    # ★★ A DOCUMENT EXISTING IS NOT THE SESSION BEING COMPLETE, and treating it as
+    # such is a resume that skips broken work FOREVER. A retain that is cancelled,
+    # times out, or dies mid-ingest leaves a REAL document holding a fraction of the
+    # transcript's chunks — it is present, it is tagged, it answers recall, and it is
+    # a tenth of the session. Nothing about it looks wrong from the outside.
+    #
+    # The check: a session renders to N bytes and the strategy chunks at C, so a
+    # finished ingest holds about N/C chunks. Materially fewer means the ingest did
+    # not finish, and the session is republished (update_mode=replace, so this
+    # repairs rather than duplicates). The floor is deliberately loose — the last
+    # chunk is short and a chunk can legitimately yield no facts — because the cost
+    # of a false "incomplete" is one wasted extraction, while the cost of a false
+    # "complete" is a permanent hole in the corpus that nothing will ever look at
+    # again.
+    chunk_size=$(jq -r '.config.retain_strategies."'"$strategy"'".retain_chunk_size
+                        // .config.retain_chunk_size // 12000' <(
+      curl "''${auth[@]}" -sS -m 30 "$base/v1/default/banks/$bank/config") 2>/dev/null || echo 12000)
+    echo "strategy $strategy chunks at $chunk_size bytes"
+
+    # Depth 2 only: <projects>/<munged-cwd>/<session>.jsonl. Subagent transcripts sit
+    # a level deeper under <session>/subagents/ and are a DIFFERENT shape — every line
+    # is isSidechain, which the renderer drops, so they would render to zero turns and
+    # be silently skipped. They are out of scope here rather than accidentally empty.
+    #
+    # --min-age leaves LIVE sessions alone. The periodic run would otherwise publish a
+    # transcript that is still being written, and its own SessionEnd then re-extracts
+    # it; a session that died is settled by the time the timer next fires.
+    age=(); [ "$min_age" -gt 0 ] && age=(-mmin +"$min_age")
+    mapfile -t files < <(find "$projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' "''${age[@]}" | sort)
+    echo "found ''${#files[@]} session transcript(s) under $projects"
+
+    published=0 skipped=0 failed=0 empty=0 attempted=0
+    for f in "''${files[@]}"; do
+      session=$(basename "$f" .jsonl)
+
+      if [ "$force" -eq 0 ] && cut -f1 "$doctsv" | grep -qxF "$session"; then
+        # Present. Complete? Render locally (cheap, no server involved) to learn how
+        # many chunks a finished ingest would hold, and compare with what the bank
+        # actually has. A short document is republished rather than skipped.
+        want=0
+        if [ -r "$renderer" ]; then
+          jq -c -f "$renderer" "$f" > "$rendered" 2>/dev/null || true
+          bytes=$(wc -c < "$rendered")
+          want=$(( (bytes + chunk_size - 1) / chunk_size ))
+        fi
+        have=$(curl "''${auth[@]}" -sS -m 30 "$base/v1/default/banks/$bank/documents/$session/chunks?limit=1" \
+          | jq -r '.total // 0' 2>/dev/null || echo 0)
+        # 80% floor: the final chunk is short and chunking is not exact, so demanding
+        # equality would republish complete sessions forever.
+        floor=$(( want * 8 / 10 ))
+        if [ "$want" -eq 0 ] || [ "''${have:-0}" -ge "$floor" ]; then
+          skipped=$((skipped + 1))
+          continue
+        fi
+        printf 'INCOMPLETE     %-40s %s of ~%s chunks — republishing\n' \
+          "$session" "''${have:-0}" "$want"
+      fi
+      # Bound ATTEMPTS, not successes. Counting only successes means a run of
+      # empty or failed sessions never trips the limit and walks the whole corpus.
+      if [ "$limit" -gt 0 ] && [ "$attempted" -ge "$limit" ]; then
+        break
+      fi
+      attempted=$((attempted + 1))
+
+      # The project comes from the TRANSCRIPT'S OWN cwd, never from the directory
+      # name: Claude Code munges the path into that name by replacing / with -, and
+      # un-munging is undecidable because - is also a character inside a repo name
+      # like den-ag-design. The shortest cwd a session recorded is its root; deeper
+      # ones are subdirectories it visited.
+      # `|| true` is load-bearing, not defensive noise. writeShellApplication runs
+      # this under `set -euo pipefail`, and one malformed line makes jq exit
+      # non-zero, which under pipefail fails the pipeline and under errexit ENDS
+      # THE WHOLE RUN — silently, mid-corpus, with a zero exit status. Measured:
+      # a first version stopped after 8 of 90 sessions and reported nothing wrong.
+      project=$(jq -r 'select(.cwd) | .cwd' "$f" 2>/dev/null \
+        | awk '{ print length, $0 }' | sort -n | head -1 | cut -d' ' -f2- \
+        | xargs -r basename 2>/dev/null || true)
+      [ -n "''${project:-}" ] || project="unknown"
+
+      size=$(wc -c < "$f")
+      if [ "$dry" -eq 1 ]; then
+        printf 'WOULD PUBLISH  %-40s project=%-20s %8d bytes\n' "$session" "$project" "$size"
+        published=$((published + 1))
+        continue
+      fi
+
+      printf 'publishing     %-40s project=%-20s %8d bytes ... ' "$session" "$project" "$size"
+      start=$(date +%s)
+      # SYNC: return when extraction finishes, not when the retain is accepted. One
+      # session at a time keeps progress observable, bounds an interrupt to a single
+      # session, and keeps 90 of them off the queue at once.
+      if HINDSIGHT_ARCHIVE_SYNC=1 bash "$archiver" "$f" "$session" "$project"; then
+        elapsed=$(( $(date +%s) - start ))
+        n=$(curl "''${auth[@]}" -sS -m 30 "$base/v1/default/banks/$bank/memories/list?document_id=$session&limit=500" \
+          | jq -r '(.items // []) | length' 2>/dev/null || echo 0)
+        if [ "''${n:-0}" -gt 0 ]; then
+          printf 'ok  %s fact(s)  %ss\n' "$n" "$elapsed"
+          published=$((published + 1))
+        else
+          # The archiver exits 0 when a session renders to almost nothing, so a
+          # zero here is "nothing worth extracting", not a failure — but it is
+          # counted separately, because a run that is ALL zeroes means the renderer
+          # or the strategy broke, and a bare success count would hide that.
+          printf 'empty  %ss\n' "$elapsed"
+          empty=$((empty + 1))
+        fi
+      else
+        printf 'FAILED\n'
+        failed=$((failed + 1))
+      fi
+
+      # `if`, not `[ … ] && sleep`: as the last statement in the loop body under
+      # errexit, an && list that evaluates false is a non-zero exit status and
+      # takes the script with it — so the default of no sleep would have ended
+      # the run after the first session.
+      if [ "$sleep_between" -gt 0 ]; then sleep "$sleep_between"; fi
+    done
+
+    echo
+    echo "published $published · empty $empty · already-present $skipped · failed $failed"
+    [ "$failed" -eq 0 ]
+  '';
+}

@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  labels:
+    app.kubernetes.io/name: hubble-generate-certs
+    app.kubernetes.io/part-of: cilium
+    k8s-app: hubble-generate-certs
+  name: hubble-generate-certs-6c085071e9
+  namespace: kube-system
+spec:
+  template:
+    metadata:
+      labels:
+        k8s-app: hubble-generate-certs
+    spec:
+      automountServiceAccountToken: true
+      containers:
+        - args:
+            - --ca-generate=true
+            - --ca-reuse-secret
+            - --ca-secret-namespace=kube-system
+            - --ca-secret-name=cilium-ca
+            - --ca-common-name=Cilium CA
+            - --ca-enforce-validity-throughout-leaves-duration=true
+          command:
+            - /usr/bin/cilium-certgen
+          env:
+            - name: CILIUM_CERTGEN_CONFIG
+              value: |
+                certs:
+                - name: hubble-server-certs
+                  namespace: kube-system
+                  commonName: "*.prod.hubble-grpc.cilium.io"
+                  hosts:
+                  - "*.prod.hubble-grpc.cilium.io"
+                  usage:
+                  - signing
+                  - key encipherment
+                  - server auth
+                  - client auth
+                  validity: 8760h
+                - name: hubble-relay-client-certs
+                  namespace: kube-system
+                  commonName: "*.hubble-relay.cilium.io"
+                  hosts:
+                  - "*.hubble-relay.cilium.io"
+                  usage:
+                  - signing
+                  - key encipherment
+                  - client auth
+                  validity: 8760h
+          image: quay.io/cilium/certgen:v0.4.11@sha256:14d29a176fc96d15b154559ce1a5baf01367c10baabfa7bb8028b72f087a56f0
+          imagePullPolicy: IfNotPresent
+          name: certgen
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      hostNetwork: false
+      restartPolicy: OnFailure
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: hubble-generate-certs

@@ -1,0 +1,18 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-gateway-ingress-hindsight-cp
+  namespace: ai
+spec:
+  description: Allow only Envoy Gateway proxies to reach the hindsight control plane UI (3000).
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: hindsight-cp
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gateways
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
